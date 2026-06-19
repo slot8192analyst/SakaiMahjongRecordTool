@@ -8,8 +8,8 @@ let settings = {};
 let game = {
   date: "", hanchanNo: 1, seats: [], scores: {},
   round: { wind: "東", num: 1 }, actions: {},
-  kyotaku: 0,
-  rotation: 0   // 0..3：座席表示を何ステップずらすか
+  kyotaku: 0, rotation: 0,
+  log: [], snapshots: []
 };
 
 const DEFAULT_MEMBERS = [
@@ -56,6 +56,7 @@ function bindGlobalEvents() {
   document.getElementById("abortBtn").addEventListener("click", onAbort);
   document.getElementById("endGameBtn").addEventListener("click", onEndGame);
   document.getElementById("nextRoundBtn").addEventListener("click", onNextRound);
+  document.getElementById("prevRoundBtn").addEventListener("click", onPrevRound);
   document.getElementById("roundWind").addEventListener("change", onRoundChange);
   document.getElementById("roundNum").addEventListener("change", onRoundChange);
   document.getElementById("nextHanchanBtn").addEventListener("click", onNextHanchan);
@@ -94,8 +95,8 @@ function onStartGame() {
   game.scores = {};
   game.seats.forEach(m => { game.scores[m.id] = settings.initialScore; });
   game.round = { wind: "東", num: 1 };
-  game.kyotaku = 0;
-  game.rotation = 0;
+  game.kyotaku = 0; game.rotation = 0;
+  game.log = []; game.snapshots = [];
   buildRecordScreen();
   showScreen("record");
 }
@@ -107,6 +108,7 @@ function buildRecordScreen() {
   resetActions();
   buildPlayerRows();
   renderScores();
+  updatePrevButton();
 }
 
 function resetActions() {
@@ -114,7 +116,8 @@ function resetActions() {
   game.seats.forEach(m => {
     game.actions[m.id] = {
       action: "none", actionJunme: "",
-      agari: "none", agariJunme: "", point: ""
+      agari: "none", agariJunme: "",
+      point: "", pointKo: "", pointOya: ""
     };
   });
 }
@@ -131,9 +134,10 @@ function buildPlayerRows() {
 
   game.seats.forEach((m, i) => {
     const isOya = (i === oyaIdx);
+    const a = game.actions[m.id];
     const ronOptions = game.seats
       .filter(o => o.id !== m.id)
-      .map(o => `<option value="${o.id}">${o.name}</option>`)
+      .map(o => `<option value="${o.id}" ${String(o.id) === a.agari ? "selected" : ""}>${o.name}</option>`)
       .join("");
 
     const card = document.createElement("div");
@@ -144,23 +148,23 @@ function buildPlayerRows() {
         <div class="oya-mark ${isOya ? "is-oya" : ""}">${isOya ? "親" : "子"}</div>
         <div class="pc-name">${m.name}</div>
         <div class="seg" data-role="action">
-          <button type="button" data-val="none" class="active">未</button>
-          <button type="button" data-val="fuuro">副露</button>
-          <button type="button" data-val="riichi">立直</button>
+          <button type="button" data-val="none" class="${a.action === "none" ? "active" : ""}">未</button>
+          <button type="button" data-val="fuuro" class="${a.action === "fuuro" ? "active" : ""}">副露</button>
+          <button type="button" data-val="riichi" class="${a.action === "riichi" ? "active" : ""}">立直</button>
         </div>
-        <input type="number" class="pc-input junme in-action-junme" placeholder="巡目" min="1">
+        <input type="number" class="pc-input junme in-action-junme" placeholder="巡目" min="1" value="${a.actionJunme}">
       </div>
       <div class="pc-row2">
         <span class="pc-label">和了</span>
         <select class="pc-input agari in-agari">
-          <option value="none">なし</option>
-          <option value="tenpai">聴牌</option>
-          <option value="tsumo">ツモ</option>
+          <option value="none" ${a.agari === "none" ? "selected" : ""}>なし</option>
+          <option value="tenpai" ${a.agari === "tenpai" ? "selected" : ""}>聴牌</option>
+          <option value="tsumo" ${a.agari === "tsumo" ? "selected" : ""}>ツモ</option>
           ${ronOptions}
         </select>
-        <input type="number" class="pc-input junme in-agari-junme" placeholder="巡目" min="1">
-        <input type="number" class="pc-input point in-point" placeholder="点数" step="100">
+        <input type="number" class="pc-input junme in-agari-junme" placeholder="巡目" min="1" value="${a.agariJunme}">
       </div>
+      <div class="pc-row2 point-row"></div>
     `;
     list.appendChild(card);
 
@@ -169,11 +173,70 @@ function buildPlayerRows() {
         card.querySelectorAll('.seg[data-role="action"] button').forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         syncActionFromCard(card, m.id);
+        updateJunmeEnabled(card, m.id);
+        renderPointInputs(card, m.id, isOya);
       });
     });
-    card.querySelectorAll("input, select").forEach(el => {
+    card.querySelector(".in-agari").addEventListener("change", () => {
+      syncActionFromCard(card, m.id);
+      updateJunmeEnabled(card, m.id);
+      renderPointInputs(card, m.id, isOya);
+    });
+    card.querySelectorAll(".in-action-junme, .in-agari-junme").forEach(el => {
       el.addEventListener("change", () => syncActionFromCard(card, m.id));
     });
+
+    updateJunmeEnabled(card, m.id);
+    renderPointInputs(card, m.id, isOya);
+  });
+}
+
+// 巡目欄の有効/無効を制御
+function updateJunmeEnabled(card, id) {
+  const a = game.actions[id];
+  // アクション巡目：副露 or 立直のとき有効
+  const actEnabled = (a.action === "fuuro" || a.action === "riichi");
+  const actJunme = card.querySelector(".in-action-junme");
+  actJunme.disabled = !actEnabled;
+  if (!actEnabled) { actJunme.value = ""; a.actionJunme = ""; }
+
+  // 和了巡目：あがり（ツモ or ロン）のとき有効
+  const isWin = (a.agari === "tsumo" || /^\d+$/.test(a.agari));
+  const agJunme = card.querySelector(".in-agari-junme");
+  agJunme.disabled = !isWin;
+  if (!isWin) { agJunme.value = ""; a.agariJunme = ""; }
+}
+
+function renderPointInputs(card, id, isOya) {
+  const a = game.actions[id];
+  const row = card.querySelector(".point-row");
+  const ag = a.agari;
+
+  if (ag === "tsumo") {
+    if (isOya) {
+      row.innerHTML = `
+        <span class="pc-sublabel">all</span>
+        <input type="number" class="pc-input point in-point" placeholder="各子の支払い" step="100" value="${a.point}">
+      `;
+    } else {
+      row.innerHTML = `
+        <span class="pc-sublabel">子</span>
+        <input type="number" class="pc-input point in-point-ko" placeholder="子の支払い" step="100" value="${a.pointKo}">
+        <span class="pc-sublabel">親</span>
+        <input type="number" class="pc-input point in-point-oya" placeholder="親の支払い" step="100" value="${a.pointOya}">
+      `;
+    }
+  } else if (/^\d+$/.test(ag)) {
+    row.innerHTML = `
+      <span class="pc-sublabel">点数</span>
+      <input type="number" class="pc-input point in-point" placeholder="放銃額" step="100" value="${a.point}">
+    `;
+  } else {
+    row.innerHTML = "";
+  }
+
+  row.querySelectorAll("input").forEach(el => {
+    el.addEventListener("change", () => syncActionFromCard(card, id));
   });
 }
 
@@ -181,19 +244,26 @@ function syncActionFromCard(card, id) {
   const a = game.actions[id];
   const activeBtn = card.querySelector('.seg[data-role="action"] button.active');
   a.action      = activeBtn ? activeBtn.dataset.val : "none";
-  a.actionJunme = card.querySelector(".in-action-junme").value;
+  const actJ = card.querySelector(".in-action-junme");
+  a.actionJunme = actJ.disabled ? "" : actJ.value;
   a.agari       = card.querySelector(".in-agari").value;
-  a.agariJunme  = card.querySelector(".in-agari-junme").value;
-  a.point       = card.querySelector(".in-point").value;
+  const agJ = card.querySelector(".in-agari-junme");
+  a.agariJunme  = agJ.disabled ? "" : agJ.value;
+
+  const pEl = card.querySelector(".in-point");
+  const koEl = card.querySelector(".in-point-ko");
+  const oyaEl = card.querySelector(".in-point-oya");
+  if (pEl) a.point = pEl.value;
+  if (koEl) a.pointKo = koEl.value;
+  if (oyaEl) a.pointOya = oyaEl.value;
+
   const winning = (a.agari === "tsumo" || /^\d+$/.test(a.agari));
   card.classList.toggle("has-agari", winning);
 }
 
-// 座席DOMの並び（手前→右→対面→左）。回転はこの割り当てをずらすだけ。
 const SEAT_DOM_IDS = ["seatBottom", "seatRight", "seatTop", "seatLeft"];
 
 function renderScores() {
-  // rotation ステップ分、表示するプレイヤーをずらす
   SEAT_DOM_IDS.forEach((domId, pos) => {
     const seatIdx = (pos + game.rotation) % 4;
     const m = game.seats[seatIdx];
@@ -213,44 +283,98 @@ function onRotate() {
   renderScores();
 }
 
-function distributePoints({ kind, winnerId, loserId, isOya, point, oyaId, honba }) {
+function pushSnapshot() {
+  game.snapshots.push({
+    scores: JSON.parse(JSON.stringify(game.scores)),
+    round: JSON.parse(JSON.stringify(game.round)),
+    honba: getHonba(),
+    kyotaku: game.kyotaku,
+    logLen: game.log.length
+  });
+}
+
+function onPrevRound() {
+  if (game.snapshots.length === 0) return;
+  if (!confirm("前の局に戻ります。直近の記録を取り消して入力し直せます。よろしいですか？")) return;
+  const snap = game.snapshots.pop();
+  game.scores = snap.scores;
+  game.round = snap.round;
+  game.kyotaku = snap.kyotaku;
+
+  const prevEntry = game.log[snap.logLen];
+  game.log = game.log.slice(0, snap.logLen);
+
+  document.getElementById("roundWind").value = game.round.wind;
+  document.getElementById("roundNum").value = game.round.num;
+  document.getElementById("honba").value = snap.honba;
+
+  restoreActions(prevEntry);
+  buildPlayerRows();
+  renderScores();
+  updatePrevButton();
+}
+
+function restoreActions(entry) {
+  resetActions();
+  if (!entry) return;
+  entry.players.forEach(p => {
+    if (!game.actions[p.id]) return;
+    game.actions[p.id] = {
+      action: p.action, actionJunme: p.actionJunme,
+      agari: p.agari, agariJunme: p.agariJunme,
+      point: p.point || "", pointKo: p.pointKo || "", pointOya: p.pointOya || ""
+    };
+  });
+}
+
+function updatePrevButton() {
+  document.getElementById("prevRoundBtn").disabled = (game.snapshots.length === 0);
+}
+
+function recordLog() {
+  const entry = {
+    wind: game.round.wind, num: game.round.num, honba: getHonba(),
+    players: game.seats.map(m => {
+      const a = game.actions[m.id];
+      return {
+        name: m.name, id: m.id,
+        action: a.action, actionJunme: a.actionJunme,
+        agari: a.agari, agariJunme: a.agariJunme,
+        point: a.point, pointKo: a.pointKo, pointOya: a.pointOya
+      };
+    })
+  };
+  game.log.push(entry);
+}
+
+function distributePoints({ kind, winnerId, loserId, isOya, point, pointKo, pointOya, oyaId }) {
   const delta = {};
   game.seats.forEach(m => { delta[m.id] = 0; });
 
   if (kind === "ron") {
+    if (!point) return { ok: false, msg: "放銃額が入力されていません。" };
     delta[winnerId] += point;
     delta[loserId]  -= point;
     return { ok: true, delta };
   }
 
-  const honbaPer = honba * 100;
-  const honbaTotal = honbaPer * 3;
-  const base = point - honbaTotal;
-  if (base < 0) return { ok: false, msg: "入力点数が本場分より小さいです。点数を確認してください。" };
-
   if (kind === "tsumo" && isOya) {
-    if (base % 3 !== 0) return { ok: false, msg: "親ツモの点数が3で割り切れません。点数を確認してください。" };
-    const eachBase = base / 3;
-    if (eachBase % 100 !== 0) return { ok: false, msg: "親ツモの分配で100点未満の端数が発生しました。" };
+    if (!point) return { ok: false, msg: "親ツモの支払額(all)が入力されていません。" };
     let gained = 0;
     game.seats.forEach(m => {
       if (m.id === winnerId) return;
-      const pay = eachBase + honbaPer;
-      delta[m.id] -= pay; gained += pay;
+      delta[m.id] -= point; gained += point;
     });
     delta[winnerId] += gained;
     return { ok: true, delta };
   }
 
   if (kind === "tsumo" && !isOya) {
-    if (base % 4 !== 0) return { ok: false, msg: "子ツモの点数が親2:子1:子1で割り切れません。点数を確認してください。" };
-    const unit = base / 4;
-    const koPay = unit, oyaPay = unit * 2;
-    if (koPay % 100 !== 0 || oyaPay % 100 !== 0) return { ok: false, msg: "子ツモの分配で100点未満の端数が発生しました。" };
+    if (!pointKo || !pointOya) return { ok: false, msg: "子ツモの子払い・親払いが入力されていません。" };
     let gained = 0;
     game.seats.forEach(m => {
       if (m.id === winnerId) return;
-      const pay = ((m.id === oyaId) ? oyaPay : koPay) + honbaPer;
+      const pay = (m.id === oyaId) ? pointOya : pointKo;
       delta[m.id] -= pay; gained += pay;
     });
     delta[winnerId] += gained;
@@ -272,7 +396,6 @@ function headBumpWinner(winners, loserId) {
 
 function onCalc() {
   const oyaId = getOyaId();
-  const honba = getHonba();
 
   const winners = game.seats.filter(m => {
     const ag = game.actions[m.id].agari;
@@ -293,14 +416,18 @@ function onCalc() {
 
   for (const w of winners) {
     const a = game.actions[w.id];
-    const point = Number(a.point) || 0;
     const isOya = (w.id === oyaId);
     let res;
     if (a.agari === "tsumo") {
-      res = distributePoints({ kind: "tsumo", winnerId: w.id, isOya, point, oyaId, honba });
+      res = distributePoints({
+        kind: "tsumo", winnerId: w.id, isOya, oyaId,
+        point: Number(a.point) || 0,
+        pointKo: Number(a.pointKo) || 0,
+        pointOya: Number(a.pointOya) || 0
+      });
     } else {
       const loserId = Number(a.agari);
-      res = distributePoints({ kind: "ron", winnerId: w.id, loserId, isOya, point, oyaId, honba });
+      res = distributePoints({ kind: "ron", winnerId: w.id, loserId, oyaId, point: Number(a.point) || 0 });
     }
     if (!res.ok) { alert(`${w.name}：${res.msg}`); return; }
     game.seats.forEach(m => { totalDelta[m.id] += res.delta[m.id]; });
@@ -316,6 +443,9 @@ function onCalc() {
   }
   totalDelta[kyotakuWinnerId] += pendingKyotaku;
 
+  pushSnapshot();
+  recordLog();
+
   game.seats.forEach(m => { game.scores[m.id] += totalDelta[m.id]; });
   game.kyotaku = 0;
   renderScores();
@@ -330,10 +460,14 @@ function onCalc() {
     advanceRound(false);
     alert("記録しました（局進行・本場リセット）");
   }
+  updatePrevButton();
 }
 
 function onRyukyoku() {
   const oyaId = getOyaId();
+  pushSnapshot();
+  recordLog();
+
   const riichiPlayers = game.seats.filter(m => game.actions[m.id].action === "riichi");
   riichiPlayers.forEach(m => { game.scores[m.id] -= 1000; });
   game.kyotaku += riichiPlayers.length * 1000;
@@ -350,15 +484,18 @@ function onRyukyoku() {
     advanceRound(true);
     alert("流局を記録しました（局進行・本場+1。供託は持ち越し）");
   }
+  updatePrevButton();
 }
 
 function onAbort() {
+  pushSnapshot();
+  recordLog();
   incrementHonba();
   refreshActions();
   alert("途中流局を記録しました（局据え置き・本場+1。供託は持ち越し）");
+  updatePrevButton();
 }
 
-// 立直者は門前確定のため自動で聴牌扱い。聴牌選択・あがりも聴牌扱い。
 function isTenpai(id) {
   const a = game.actions[id];
   if (a.action === "riichi") return true;
@@ -471,7 +608,9 @@ function saveHistory(results) {
   const history = loadHistory();
   history.push({
     date: game.date, hanchanNo: game.hanchanNo,
-    savedAt: new Date().toISOString(), results: results
+    savedAt: new Date().toISOString(),
+    seats: game.seats.map(m => m.name),
+    results: results, log: game.log
   });
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(history)); }
   catch (e) { alert("履歴の保存に失敗しました（ブラウザの設定をご確認ください）"); }
@@ -485,6 +624,55 @@ function openHistory() {
   renderHistoryList();
   showScreen("history");
 }
+
+// ツモの増加総額を計算
+function tsumoTotal(p) {
+  // 親ツモ：all × 3、子ツモ：子払い×2 + 親払い
+  if (p.point) return Number(p.point) * 3;
+  const ko = Number(p.pointKo) || 0;
+  const oya = Number(p.pointOya) || 0;
+  return ko * 2 + oya;
+}
+
+function formatPlayerLog(p, nameById) {
+  const parts = [p.name];
+  const isWin = (p.agari === "tsumo" || /^\d+$/.test(p.agari));
+
+  if (p.action === "riichi") parts.push("立直" + (p.actionJunme || ""));
+  else if (p.action === "fuuro") parts.push("副露" + (p.actionJunme || ""));
+  else if (isWin) parts.push("闇聴");
+
+  if (p.agari === "tsumo") {
+    parts.push("自摸" + (p.agariJunme || ""));
+    const total = tsumoTotal(p);
+    if (total) parts.push(String(total));
+  } else if (/^\d+$/.test(p.agari)) {
+    const loser = nameById[p.agari] || "";
+    parts.push(loser + (p.agariJunme || ""));
+    if (p.point) parts.push(p.point);
+  } else if (p.agari === "tenpai") {
+    parts.push("聴牌");
+  }
+  return parts.join(",");
+}
+
+function logToText(h) {
+  const lines = [];
+  const nameById = {};
+  if (h.log && h.log.length) h.log[0].players.forEach(p => { nameById[p.id] = p.name; });
+
+  lines.push(`${h.hanchanNo}半荘目`);
+  if (h.seats) lines.push(h.seats.join(","));
+  (h.log || []).forEach(entry => {
+    lines.push(`${entry.wind}${entry.num}局${entry.honba}本場`);
+    entry.players.forEach(p => {
+      const hasContent = (p.action !== "none") || (p.agari !== "none");
+      if (hasContent) lines.push(formatPlayerLog(p, nameById));
+    });
+  });
+  return lines.join("\n");
+}
+
 function renderHistoryList() {
   const list = document.getElementById("historyList");
   const history = loadHistory();
@@ -504,16 +692,23 @@ function renderHistoryList() {
         <td class="r ${cls}">${sign(r.total)}</td>
       </tr>`;
     }).join("");
+    const logText = logToText(h);
+
     list.insertAdjacentHTML("beforeend", `
       <div class="history-card">
         <div class="hc-head">
           <span>${h.date}　${h.hanchanNo}半荘目</span>
-          <button class="hc-copy" data-idx="${idx}">コピー</button>
+          <span>
+            <button class="hc-log-toggle" data-idx="${idx}">明細</button>
+            <button class="hc-copy" data-idx="${idx}">コピー</button>
+          </span>
         </div>
         <table>${rows}</table>
+        <div class="hc-log" data-log="${idx}" hidden>${escapeHtml(logText)}</div>
       </div>
     `);
   });
+
   list.querySelectorAll(".hc-copy").forEach(btn => {
     btn.addEventListener("click", () => {
       const idx = Number(btn.dataset.idx);
@@ -522,20 +717,30 @@ function renderHistoryList() {
       setTimeout(() => { btn.textContent = "コピー"; }, 1500);
     });
   });
+  list.querySelectorAll(".hc-log-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = btn.dataset.idx;
+      const logEl = list.querySelector(`.hc-log[data-log="${idx}"]`);
+      logEl.hidden = !logEl.hidden;
+      btn.textContent = logEl.hidden ? "明細" : "閉じる";
+    });
+  });
 }
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function historyToText(history) {
-  const sign = v => (v > 0 ? "+" : "") + v.toFixed(1);
   const lines = [];
   history.forEach(h => {
-    lines.push(`【${h.date} ${h.hanchanNo}半荘目】`);
-    lines.push(["順位", "名前", "点数", "素点", "ウマオカ", "収支"].join("\t"));
-    h.results.forEach(r => {
-      lines.push([r.rank + "位", r.name, r.score, sign(r.raw), sign(r.umaOka), sign(r.total)].join("\t"));
-    });
+    lines.push(h.date);
+    lines.push(logToText(h));
     lines.push("");
   });
   return lines.join("\n");
 }
+
 function copyAllHistory() {
   const history = loadHistory();
   if (history.length === 0) { alert("コピーする履歴がありません"); return; }
