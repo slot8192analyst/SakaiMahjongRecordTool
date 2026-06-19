@@ -4,7 +4,9 @@
     { "id": 2, "name": "高木" },
     { "id": 3, "name": "中江" },
     { "id": 4, "name": "福原" },
-    { "id": 5, "name": "大村" }
+    { "id": 4, "name": "志村" },
+    { "id": 5, "name": "遥平" },
+    { "id": 6, "name": "大村" }
   ],
   "settings": {
     "initialScore": 25000,
