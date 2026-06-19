@@ -9,75 +9,107 @@
 <body>
   <div class="phone-frame">
 
-    <!-- ===== 上半分：入力エリア ===== -->
-    <section class="input-area">
-
-      <!-- 局情報バー -->
-      <div class="round-bar">
-        <select id="roundWind">
-          <option value="東">東</option>
-          <option value="南">南</option>
-          <option value="西">西</option>
-        </select>
-        <select id="roundNum">
-          <option value="1">1局</option>
-          <option value="2">2局</option>
-          <option value="3">3局</option>
-          <option value="4">4局</option>
-        </select>
-        <input type="number" id="honba" min="0" value="0" placeholder="本場">
-        <span class="unit">本場</span>
+    <section class="screen" id="screen-setup">
+      <h2 class="screen-title">対局設定</h2>
+      <div class="setup-body">
+        <div class="setup-row">
+          <label>日付</label>
+          <input type="date" id="gameDate">
+        </div>
+        <div class="setup-row">
+          <label>半荘</label>
+          <input type="number" id="hanchanNo" min="1" value="1">
+          <span class="unit">半荘目</span>
+        </div>
+        <div class="setup-section-title">参加メンバー（東南西北 順）</div>
+        <div class="seat-setup" id="seatSetup"></div>
       </div>
-
-      <!-- プレイヤー行（4行：親選択 + 名前 + 役割系） -->
-      <div class="player-list" id="playerList">
-        <!-- JSで生成 -->
-      </div>
-
-      <!-- アガリ詳細 -->
-      <div class="agari-detail">
-        <div class="agari-row">
-          <label>結果</label>
-          <select id="resultType">
-            <option value="ron">ロン</option>
-            <option value="tsumo">ツモ</option>
-            <option value="ryukyoku">流局</option>
-          </select>
-        </div>
-        <div class="agari-row" id="winnerRow">
-          <label>和了者</label>
-          <select id="winner"></select>
-        </div>
-        <div class="agari-row" id="loserRow">
-          <label>放銃者</label>
-          <select id="loser"></select>
-        </div>
-        <div class="agari-row">
-          <label>飜</label>
-          <input type="number" id="han" min="1" value="1">
-          <label>符</label>
-          <input type="number" id="fu" min="20" step="10" value="30">
-        </div>
-        <div class="agari-row btn-row">
-          <button id="calcBtn" type="button">記録・計算</button>
-          <button id="resetBtn" type="button" class="sub">リセット</button>
-        </div>
+      <div class="setup-footer">
+        <button class="primary-btn" id="startBtn">対局開始 →</button>
+        <button class="ghost-btn" id="historyBtn">対局履歴を見る</button>
       </div>
     </section>
 
-    <!-- ===== 下半分：点数表示エリア ===== -->
-    <section class="score-area">
-      <div class="table-layout">
-        <div class="seat seat-top"    id="seatTop"></div>
-        <div class="seat seat-left"   id="seatLeft"></div>
-        <div class="seat seat-right"  id="seatRight"></div>
-        <div class="seat seat-bottom" id="seatBottom"></div>
-        <div class="table-center" id="tableCenter">合計<br>100000</div>
+    <section class="screen" id="screen-record" hidden>
+      <div class="input-area">
+        <div class="round-bar">
+          <select id="roundWind">
+            <option value="東">東</option>
+            <option value="南">南</option>
+            <option value="西">西</option>
+            <option value="北">北</option>
+          </select>
+          <select id="roundNum">
+            <option value="1">1局</option>
+            <option value="2">2局</option>
+            <option value="3">3局</option>
+            <option value="4">4局</option>
+          </select>
+          <input type="number" id="honba" min="0" value="0">
+          <span class="unit">本場</span>
+          <button id="nextRoundBtn" class="mini-btn">次局 ▶</button>
+        </div>
+
+        <div class="player-list" id="playerList"></div>
+
+        <div class="agari-detail">
+          <div class="agari-row btn-row">
+            <button id="calcBtn" type="button">記録・計算</button>
+          </div>
+          <div class="agari-row btn-row sub-btns">
+            <button id="ryukyokuBtn" type="button" class="sub-btn">流局</button>
+            <button id="abortBtn" type="button" class="sub-btn">九種九牌 / 四風連打</button>
+          </div>
+          <div class="agari-row btn-row">
+            <button id="endGameBtn" type="button" class="end-btn">対局終了</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="score-area">
+        <div class="score-toolbar">
+          <span class="kyotaku-label">供託 <span id="kyotakuView">0</span></span>
+          <button id="rotateBtn" type="button" class="rotate-btn">⟳ 回転</button>
+        </div>
+        <div class="table-wrap" id="tableWrap">
+          <div class="table-layout" id="tableLayout">
+            <div class="seat seat-top"    id="seatTop"></div>
+            <div class="seat seat-left"   id="seatLeft"></div>
+            <div class="seat seat-right"  id="seatRight"></div>
+            <div class="seat seat-bottom" id="seatBottom"></div>
+            <div class="table-center" id="tableCenter"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="screen" id="screen-result" hidden>
+      <h2 class="screen-title">対局結果</h2>
+      <div class="result-meta" id="resultMeta"></div>
+      <table class="result-table" id="resultTable">
+        <thead>
+          <tr><th>順位</th><th>名前</th><th>点数</th><th>素点</th><th>ウマ・オカ</th><th>収支</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="result-footer">
+        <button class="primary-btn" id="nextHanchanBtn">次の半荘へ →</button>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-history" hidden>
+      <h2 class="screen-title">対局履歴</h2>
+      <div class="history-toolbar">
+        <button class="ghost-btn small" id="copyHistoryBtn">全履歴をコピー</button>
+        <button class="ghost-btn small danger" id="clearHistoryBtn">全削除</button>
+      </div>
+      <div class="history-list" id="historyList"></div>
+      <div class="result-footer">
+        <button class="primary-btn" id="backFromHistoryBtn">← 設定に戻る</button>
       </div>
     </section>
 
   </div>
-
   <script src="script.js"></script>
 </body>
 </html>
