@@ -1,0 +1,14 @@
+{
+  "members": [
+    { "id": 1, "name": "坂井" },
+    { "id": 2, "name": "高木" },
+    { "id": 3, "name": "中江" },
+    { "id": 4, "name": "福原" }
+  ],
+  "settings": {
+    "initialScore": 25000,
+    "returnScore": 30000,
+    "umaTop": 20,
+    "umaSecond": 10
+  }
+}

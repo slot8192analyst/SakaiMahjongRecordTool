@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>麻雀記録ツール</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="phone-frame">
+
+    <!-- ===== 上半分：入力エリア ===== -->
+    <section class="input-area">
+
+      <!-- 局情報バー -->
+      <div class="round-bar">
+        <select id="roundWind">
+          <option value="東">東</option>
+          <option value="南">南</option>
+          <option value="西">西</option>
+        </select>
+        <select id="roundNum">
+          <option value="1">1局</option>
+          <option value="2">2局</option>
+          <option value="3">3局</option>
+          <option value="4">4局</option>
+        </select>
+        <input type="number" id="honba" min="0" value="0" placeholder="本場">
+        <span class="unit">本場</span>
+      </div>
+
+      <!-- プレイヤー行（4行：親選択 + 名前 + 役割系） -->
+      <div class="player-list" id="playerList">
+        <!-- JSで生成 -->
+      </div>
+
+      <!-- アガリ詳細 -->
+      <div class="agari-detail">
+        <div class="agari-row">
+          <label>結果</label>
+          <select id="resultType">
+            <option value="ron">ロン</option>
+            <option value="tsumo">ツモ</option>
+            <option value="ryukyoku">流局</option>
+          </select>
+        </div>
+        <div class="agari-row" id="winnerRow">
+          <label>和了者</label>
+          <select id="winner"></select>
+        </div>
+        <div class="agari-row" id="loserRow">
+          <label>放銃者</label>
+          <select id="loser"></select>
+        </div>
+        <div class="agari-row">
+          <label>飜</label>
+          <input type="number" id="han" min="1" value="1">
+          <label>符</label>
+          <input type="number" id="fu" min="20" step="10" value="30">
+        </div>
+        <div class="agari-row btn-row">
+          <button id="calcBtn" type="button">記録・計算</button>
+          <button id="resetBtn" type="button" class="sub">リセット</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 下半分：点数表示エリア ===== -->
+    <section class="score-area">
+      <div class="table-layout">
+        <div class="seat seat-top"    id="seatTop"></div>
+        <div class="seat seat-left"   id="seatLeft"></div>
+        <div class="seat seat-right"  id="seatRight"></div>
+        <div class="seat seat-bottom" id="seatBottom"></div>
+        <div class="table-center" id="tableCenter">合計<br>100000</div>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
