@@ -733,8 +733,12 @@ function escapeHtml(s) {
 
 function historyToText(history) {
   const lines = [];
+  let lastDate = "";
   history.forEach(h => {
-    lines.push(h.date);
+    if (h.date !== lastDate) {     // 日付が変わったときだけ日付行を出す
+      lines.push(h.date);
+      lastDate = h.date;
+    }
     lines.push(logToText(h));
     lines.push("");
   });
