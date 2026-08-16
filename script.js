@@ -18,6 +18,34 @@ const DEFAULT_MEMBERS = [
 ];
 const DEFAULT_SETTINGS = { initialScore: 25000, returnScore: 30000, umaTop: 20, umaSecond: 10 };
 
+const RYUKYOKU_LABELS = {
+  howanpai: "通常流局", kyushukyuhai: "九種九牌",
+  suufonrenda: "四風連打", suuchariichi: "四家立直", suukansanra: "四槓散了"
+};
+
+// ===== 翻符 → 点数 計算テーブル =====
+function baseScore(han, fu) {
+  if (han >= 13) return 8000;                 // 役満
+  if (han >= 11) return 6000;                 // 三倍満
+  if (han >= 8)  return 4000;                 // 倍満
+  if (han >= 6)  return 3000;                 // 跳満
+  if (han === 5) return 2000;                 // 満貫
+  const raw = fu * Math.pow(2, 2 + han);
+  return Math.min(2000, raw);                 // 4翻以下で満貫超えする場合は満貫キャップ
+}
+
+function scoreTable(han, fu) {
+  const base = baseScore(han, fu);
+  const ceil100 = n => Math.ceil(n / 100) * 100;
+  return {
+    ronChild: ceil100(base * 4),
+    ronDealer: ceil100(base * 6),
+    tsumoChildFromChild: ceil100(base * 1),
+    tsumoChildFromDealer: ceil100(base * 2),
+    tsumoDealerEach: ceil100(base * 2)
+  };
+}
+
 async function init() {
   try {
     const res = await fetch("members.json");
@@ -45,22 +73,27 @@ function showScreen(name) {
 }
 
 function bindGlobalEvents() {
-  document.getElementById("startBtn").addEventListener("click", onStartGame);
-  document.getElementById("historyBtn").addEventListener("click", openHistory);
-  document.getElementById("backFromHistoryBtn").addEventListener("click", () => showScreen("setup"));
-  document.getElementById("copyHistoryBtn").addEventListener("click", copyAllHistory);
-  document.getElementById("clearHistoryBtn").addEventListener("click", clearHistory);
+  const on = (id, event, handler) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(event, handler);
+    else console.warn(`要素が見つかりません: #${id}`);
+  };
 
-  document.getElementById("calcBtn").addEventListener("click", onCalc);
-  document.getElementById("ryukyokuBtn").addEventListener("click", onRyukyoku);
-  document.getElementById("abortBtn").addEventListener("click", onAbort);
-  document.getElementById("endGameBtn").addEventListener("click", onEndGame);
-  document.getElementById("nextRoundBtn").addEventListener("click", onNextRound);
-  document.getElementById("prevRoundBtn").addEventListener("click", onPrevRound);
-  document.getElementById("roundWind").addEventListener("change", onRoundChange);
-  document.getElementById("roundNum").addEventListener("change", onRoundChange);
-  document.getElementById("nextHanchanBtn").addEventListener("click", onNextHanchan);
-  document.getElementById("rotateBtn").addEventListener("click", onRotate);
+  on("startBtn", "click", onStartGame);
+  on("historyBtn", "click", openHistory);
+  on("backFromHistoryBtn", "click", () => showScreen("setup"));
+  on("copyHistoryBtn", "click", copyAllHistory);
+  on("copyJsonBtn", "click", copyJsonExport);
+  on("clearHistoryBtn", "click", clearHistory);
+  on("calcBtn", "click", onCalc);
+  on("ryukyokuBtn", "click", onRyukyoku);
+  on("endGameBtn", "click", onEndGame);
+  on("nextRoundBtn", "click", onNextRound);
+  on("prevRoundBtn", "click", onPrevRound);
+  on("roundWind", "change", onRoundChange);
+  on("roundNum", "change", onRoundChange);
+  on("nextHanchanBtn", "click", onNextHanchan);
+  on("rotateBtn", "click", onRotate);
 }
 
 function buildSetupScreen() {
@@ -117,6 +150,7 @@ function resetActions() {
     game.actions[m.id] = {
       action: "none", actionJunme: "",
       agari: "none", agariJunme: "",
+      han: "", fu: "",
       point: "", pointKo: "", pointOya: ""
     };
   });
@@ -194,48 +228,71 @@ function buildPlayerRows() {
 // 巡目欄の有効/無効を制御
 function updateJunmeEnabled(card, id) {
   const a = game.actions[id];
-  // アクション巡目：副露 or 立直のとき有効
   const actEnabled = (a.action === "fuuro" || a.action === "riichi");
   const actJunme = card.querySelector(".in-action-junme");
   actJunme.disabled = !actEnabled;
   if (!actEnabled) { actJunme.value = ""; a.actionJunme = ""; }
 
-  // 和了巡目：あがり（ツモ or ロン）のとき有効
   const isWin = (a.agari === "tsumo" || /^\d+$/.test(a.agari));
   const agJunme = card.querySelector(".in-agari-junme");
   agJunme.disabled = !isWin;
   if (!isWin) { agJunme.value = ""; a.agariJunme = ""; }
 }
 
+// ===== 和了時の入力欄（翻符 + 自動計算プレビュー + 手動上書き可） =====
 function renderPointInputs(card, id, isOya) {
   const a = game.actions[id];
   const row = card.querySelector(".point-row");
   const ag = a.agari;
+  const isWin = (ag === "tsumo" || /^\d+$/.test(ag));
 
-  if (ag === "tsumo") {
-    if (isOya) {
-      row.innerHTML = `
-        <span class="pc-sublabel">all</span>
-        <input type="number" class="pc-input point in-point" placeholder="各子の支払い" step="100" value="${a.point}">
-      `;
-    } else {
-      row.innerHTML = `
-        <span class="pc-sublabel">子</span>
-        <input type="number" class="pc-input point in-point-ko" placeholder="子の支払い" step="100" value="${a.pointKo}">
-        <span class="pc-sublabel">親</span>
-        <input type="number" class="pc-input point in-point-oya" placeholder="親の支払い" step="100" value="${a.pointOya}">
-      `;
-    }
-  } else if (/^\d+$/.test(ag)) {
-    row.innerHTML = `
-      <span class="pc-sublabel">点数</span>
-      <input type="number" class="pc-input point in-point" placeholder="放銃額" step="100" value="${a.point}">
-    `;
+  if (!isWin) { row.innerHTML = ""; return; }
+
+  let pointFieldsHtml;
+  if (ag === "tsumo" && isOya) {
+    pointFieldsHtml = `
+      <span class="pc-sublabel">all</span>
+      <input type="number" class="pc-input point in-point" placeholder="各子の支払い" step="100" value="${a.point}">`;
+  } else if (ag === "tsumo") {
+    pointFieldsHtml = `
+      <span class="pc-sublabel">子</span>
+      <input type="number" class="pc-input point in-point-ko" placeholder="子の支払い" step="100" value="${a.pointKo}">
+      <span class="pc-sublabel">親</span>
+      <input type="number" class="pc-input point in-point-oya" placeholder="親の支払い" step="100" value="${a.pointOya}">`;
   } else {
-    row.innerHTML = "";
+    pointFieldsHtml = `
+      <span class="pc-sublabel">点数</span>
+      <input type="number" class="pc-input point in-point" placeholder="放銃額" step="100" value="${a.point}">`;
   }
 
-  row.querySelectorAll("input").forEach(el => {
+  row.innerHTML = `
+    <span class="pc-sublabel">翻</span>
+    <input type="number" class="pc-input point in-han" placeholder="翻" min="1" value="${a.han || ""}">
+    <span class="pc-sublabel">符</span>
+    <input type="number" class="pc-input point in-fu" placeholder="符(満貫以上不要)" min="20" step="10" value="${a.fu || ""}">
+  `;
+  row.insertAdjacentHTML("beforeend", `<div class="pc-row2 point-sub-row">${pointFieldsHtml}</div>`);
+
+  // renderPointInputs() 内の applyAuto をこの内容に置き換え
+  const applyAuto = () => {
+    const han = Number(card.querySelector(".in-han").value) || 0;
+    const fu  = Number(card.querySelector(".in-fu").value) || 0;
+    if (han <= 0) return;
+    const honba = getHonba();
+    const t = scoreTable(han, fu || 30);
+    if (ag === "tsumo" && isOya) {
+      card.querySelector(".in-point").value = t.tsumoDealerEach + 100 * honba;
+    } else if (ag === "tsumo") {
+      card.querySelector(".in-point-ko").value = t.tsumoChildFromChild + 100 * honba;
+      card.querySelector(".in-point-oya").value = t.tsumoChildFromDealer + 100 * honba;
+    } else {
+      card.querySelector(".in-point").value = (isOya ? t.ronDealer : t.ronChild) + 300 * honba;
+    }
+    syncActionFromCard(card, id);
+  };  
+  card.querySelector(".in-han").addEventListener("change", applyAuto);
+  card.querySelector(".in-fu").addEventListener("change", applyAuto);
+  row.querySelectorAll(".point-sub-row input").forEach(el => {
     el.addEventListener("change", () => syncActionFromCard(card, id));
   });
 }
@@ -249,6 +306,11 @@ function syncActionFromCard(card, id) {
   a.agari       = card.querySelector(".in-agari").value;
   const agJ = card.querySelector(".in-agari-junme");
   a.agariJunme  = agJ.disabled ? "" : agJ.value;
+
+  const hanEl = card.querySelector(".in-han");
+  const fuEl  = card.querySelector(".in-fu");
+  if (hanEl) a.han = hanEl.value;
+  if (fuEl)  a.fu  = fuEl.value;
 
   const pEl = card.querySelector(".in-point");
   const koEl = card.querySelector(".in-point-ko");
@@ -322,6 +384,7 @@ function restoreActions(entry) {
     game.actions[p.id] = {
       action: p.action, actionJunme: p.actionJunme,
       agari: p.agari, agariJunme: p.agariJunme,
+      han: p.han || "", fu: p.fu || "",
       point: p.point || "", pointKo: p.pointKo || "", pointOya: p.pointOya || ""
     };
   });
@@ -331,15 +394,19 @@ function updatePrevButton() {
   document.getElementById("prevRoundBtn").disabled = (game.snapshots.length === 0);
 }
 
-function recordLog() {
+// recordLog(result) の entry オブジェクトに1行追加
+function recordLog(result) {
   const entry = {
     wind: game.round.wind, num: game.round.num, honba: getHonba(),
+    kyotakuAtStart: game.kyotaku,   // ← 追加：この局開始時点の供託（前局からの持ち越し分）
+    result,
     players: game.seats.map(m => {
       const a = game.actions[m.id];
       return {
         name: m.name, id: m.id,
         action: a.action, actionJunme: a.actionJunme,
         agari: a.agari, agariJunme: a.agariJunme,
+        han: a.han, fu: a.fu,
         point: a.point, pointKo: a.pointKo, pointOya: a.pointOya
       };
     })
@@ -403,8 +470,16 @@ function onCalc() {
   });
 
   if (winners.length === 0) {
-    alert("和了者がいません。流局の場合は「流局」ボタンを押してください。");
+    alert("和了者がいません。流局の場合は下の「流局処理」ボタンを押してください。");
     return;
+  }
+
+  for (const w of winners) {
+    const junme = game.actions[w.id].agariJunme;
+    if (!junme || !/^\d+$/.test(String(junme)) || Number(junme) <= 0) {
+      alert(`${w.name}：和了巡目が入力されていません。何巡目の和了か必ず入力してください。`);
+      return;
+    }
   }
 
   const totalDelta = {};
@@ -444,7 +519,7 @@ function onCalc() {
   totalDelta[kyotakuWinnerId] += pendingKyotaku;
 
   pushSnapshot();
-  recordLog();
+  recordLog({ kind: "hora" });
 
   game.seats.forEach(m => { game.scores[m.id] += totalDelta[m.id]; });
   game.kyotaku = 0;
@@ -463,44 +538,17 @@ function onCalc() {
   updatePrevButton();
 }
 
-function onRyukyoku() {
-  const oyaId = getOyaId();
-  pushSnapshot();
-  recordLog();
-
-  const riichiPlayers = game.seats.filter(m => game.actions[m.id].action === "riichi");
-  riichiPlayers.forEach(m => { game.scores[m.id] -= 1000; });
-  game.kyotaku += riichiPlayers.length * 1000;
-
-  applyTenpaiPayments();
-  renderScores();
-
-  const oyaTenpai = isTenpai(oyaId);
-  if (oyaTenpai) {
-    incrementHonba();
-    refreshActions();
-    alert("流局を記録しました（親聴牌・連荘・本場+1。供託は持ち越し）");
-  } else {
-    advanceRound(true);
-    alert("流局を記録しました（局進行・本場+1。供託は持ち越し）");
-  }
-  updatePrevButton();
-}
-
-function onAbort() {
-  pushSnapshot();
-  recordLog();
-  incrementHonba();
-  refreshActions();
-  alert("途中流局を記録しました（局据え置き・本場+1。供託は持ち越し）");
-  updatePrevButton();
-}
-
 function isTenpai(id) {
   const a = game.actions[id];
   if (a.action === "riichi") return true;
   const ag = a.agari;
   return ag === "tenpai" || ag === "tsumo" || /^\d+$/.test(ag);
+}
+
+function applyRiichiKyotaku() {
+  const riichiPlayers = game.seats.filter(m => game.actions[m.id].action === "riichi");
+  riichiPlayers.forEach(m => { game.scores[m.id] -= 1000; });
+  game.kyotaku += riichiPlayers.length * 1000;
 }
 
 function applyTenpaiPayments() {
@@ -512,6 +560,47 @@ function applyTenpaiPayments() {
   const payEach  = Math.round(3000 / n);
   tenpaiIds.forEach(id => { game.scores[id] += recvEach; });
   notenIds.forEach(id => { game.scores[id] -= payEach; });
+}
+
+function hasPendingWinSelection() {
+  return game.seats.some(m => {
+    const ag = game.actions[m.id].agari;
+    return ag === "tsumo" || /^\d+$/.test(ag);
+  });
+}
+
+// ===== 流局処理(通常流局 / 途中流局 まとめて対応) =====
+function onRyukyoku() {
+  if (hasPendingWinSelection()) {
+    alert("和了欄に選択が残っているプレイヤーがいます。「なし」または「聴牌」に変更してから、もう一度「流局処理」を押してください。");
+    return;
+  }
+  const reason = document.getElementById("ryukyokuReason").value;
+  const oyaId = getOyaId();
+
+  pushSnapshot();
+  const tenpaiIds = game.seats.filter(m => isTenpai(m.id)).map(m => m.id);
+  recordLog({ kind: "ryukyoku", reason, tenpai: tenpaiIds });
+
+  applyRiichiKyotaku(); // どの理由でも必ず実行(四家立直の供託を含む)
+
+  let renchan;
+  if (reason === "howanpai") {
+    applyTenpaiPayments();       // ノーテン罰符は通常流局のみ
+    renchan = isTenpai(oyaId);
+  } else {
+    renchan = true;              // 途中流局は常に連荘・罰符なし
+  }
+  renderScores();
+
+  if (renchan) {
+    incrementHonba();
+    refreshActions();
+  } else {
+    advanceRound(true);
+  }
+  alert(`${RYUKYOKU_LABELS[reason]}を記録しました（供託は持ち越し）`);
+  updatePrevButton();
 }
 
 function incrementHonba() {
@@ -625,9 +714,7 @@ function openHistory() {
   showScreen("history");
 }
 
-// ツモの増加総額を計算
 function tsumoTotal(p) {
-  // 親ツモ：all × 3、子ツモ：子払い×2 + 親払い
   if (p.point) return Number(p.point) * 3;
   const ko = Number(p.pointKo) || 0;
   const oya = Number(p.pointOya) || 0;
@@ -665,6 +752,9 @@ function logToText(h) {
   if (h.seats) lines.push(h.seats.join(","));
   (h.log || []).forEach(entry => {
     lines.push(`${entry.wind}${entry.num}局${entry.honba}本場`);
+    if (entry.result && entry.result.kind === "ryukyoku" && entry.result.reason !== "howanpai") {
+      lines.push(`(${RYUKYOKU_LABELS[entry.result.reason]})`);
+    }
     entry.players.forEach(p => {
       const hasContent = (p.action !== "none") || (p.agari !== "none");
       if (hasContent) lines.push(formatPlayerLog(p, nameById));
@@ -735,7 +825,7 @@ function historyToText(history) {
   const lines = [];
   let lastDate = "";
   history.forEach(h => {
-    if (h.date !== lastDate) {     // 日付が変わったときだけ日付行を出す
+    if (h.date !== lastDate) {
       lines.push(h.date);
       lastDate = h.date;
     }
@@ -772,3 +862,120 @@ function onNextHanchan() {
 }
 
 window.addEventListener("DOMContentLoaded", init);
+
+const WIND_TO_BAKAZE = { "東": "E", "南": "S", "西": "W", "北": "N" };
+
+function seatIdxInPlayers(players, id) {
+  return players.findIndex(p => p.id === id);
+}
+
+// 1局分のログエントリ → 新スキーマのkyokuオブジェクト
+function kyokuFromLogEntry(entry) {
+  const events = [];
+  const players = entry.players;
+  const oyaSeatIdx = (entry.num - 1) % 4;
+
+  // 副露・立直
+  players.forEach((p, idx) => {
+    if (p.action === "fuuro" && p.actionJunme) {
+      events.push({ t: Number(p.actionJunme), type: "meld", actor: idx });
+    } else if (p.action === "riichi" && p.actionJunme) {
+      events.push({ t: Number(p.actionJunme), type: "reach", actor: idx });
+    }
+  });
+
+  // 和了
+  players.forEach((p, idx) => {
+    if (p.agari === "tsumo") {
+      const isOyaWin = (idx === oyaSeatIdx);
+      const points = isOyaWin
+        ? (Number(p.point) || 0) * 3
+        : (Number(p.pointKo) || 0) * 2 + (Number(p.pointOya) || 0);
+      events.push({
+        t: p.agariJunme ? Number(p.agariJunme) : null,
+        type: "hora", actor: idx, target: null,
+        han: p.han ? Number(p.han) : undefined,
+        fu: p.fu ? Number(p.fu) : undefined,
+        points
+      });
+    } else if (/^\d+$/.test(p.agari)) {
+      events.push({
+        t: p.agariJunme ? Number(p.agariJunme) : null,
+        type: "hora", actor: idx, target: seatIdxInPlayers(players, Number(p.agari)),
+        han: p.han ? Number(p.han) : undefined,
+        fu: p.fu ? Number(p.fu) : undefined,
+        points: Number(p.point) || 0
+      });
+    }
+  });
+
+  // 流局
+  if (entry.result && entry.result.kind === "ryukyoku") {
+    events.push({
+      type: "ryukyoku",
+      kind: entry.result.reason,
+      tenpai: entry.result.tenpai.map(id => seatIdxInPlayers(players, id))
+    });
+  }
+
+  return {
+    bakaze: WIND_TO_BAKAZE[entry.wind] || entry.wind,
+    kyoku: entry.num,
+    honba: entry.honba,
+    kyotaku: entry.kyotakuAtStart || 0,
+    oya: oyaSeatIdx,
+    events
+  };
+}
+
+function buildJsonExport() {
+  const history = loadHistory();
+  const byDate = {};
+  history.forEach(h => {
+    (byDate[h.date] = byDate[h.date] || []).push(h);
+  });
+
+  const playerMap = {};
+  history.forEach(h => {
+    (h.log || []).forEach(entry => {
+      entry.players.forEach(p => { playerMap[p.id] = p.name; });
+    });
+  });
+
+  const sessions = Object.keys(byDate).sort().map(date => ({
+    date,
+    hanchans: byDate[date].map(h => {
+      const seatIds = (h.log && h.log[0]) ? h.log[0].players.map(p => p.id) : [];
+      const nameToScore = {};
+      h.results.forEach(r => { nameToScore[r.name] = r.score; });
+      return {
+        no: h.hanchanNo,
+        seats: seatIds,
+        finalScoresActual: h.seats.map(name => nameToScore[name]),
+        kyokus: (h.log || []).map(kyokuFromLogEntry)
+      };
+    })
+  }));
+
+  return {
+    schemaVersion: 1,
+    rules: {
+      startPoints: settings.initialScore,
+      returnPoints: settings.returnScore,
+      uma: [settings.umaTop, settings.umaSecond, -settings.umaSecond, -settings.umaTop],
+      rating: { base: 1500, divisor: 40, coef: 0.002, cap: 400 },
+      rate: { yenPerPoint: null, yenPerChip: null }
+    },
+    players: Object.keys(playerMap).map(id => ({ id: Number(id), name: playerMap[id] })),
+    sessions
+  };
+}
+
+function copyJsonExport() {
+  const history = loadHistory();
+  if (history.length === 0) { alert("出力する履歴がありません"); return; }
+  copyToClipboard(JSON.stringify(buildJsonExport(), null, 2));
+  const btn = document.getElementById("copyJsonBtn");
+  btn.textContent = "コピーしました✓";
+  setTimeout(() => { btn.textContent = "JSON出力"; }, 1500);
+}

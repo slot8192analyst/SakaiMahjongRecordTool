@@ -58,8 +58,14 @@
             <button id="calcBtn" type="button">記録・計算</button>
           </div>
           <div class="agari-row btn-row sub-btns">
-            <button id="ryukyokuBtn" type="button" class="sub-btn">流局</button>
-            <button id="abortBtn" type="button" class="sub-btn">九種九牌 / 四風連打</button>
+            <select id="ryukyokuReason" class="pc-input" style="flex:1;">
+              <option value="howanpai">通常流局(荒牌平局)</option>
+              <option value="kyushukyuhai">九種九牌</option>
+              <option value="suufonrenda">四風連打</option>
+              <option value="suuchariichi">四家立直</option>
+              <option value="suukansanra">四槓散了</option>
+            </select>
+            <button id="ryukyokuBtn" type="button" class="sub-btn">流局処理</button>
           </div>
           <div class="agari-row btn-row">
             <button id="endGameBtn" type="button" class="end-btn">対局終了</button>
@@ -102,8 +108,10 @@
       <h2 class="screen-title">対局履歴</h2>
       <div class="history-toolbar">
         <button class="ghost-btn small" id="copyHistoryBtn">全履歴をコピー</button>
+        <button class="ghost-btn small" id="copyJsonBtn">JSON出力</button>
         <button class="ghost-btn small danger" id="clearHistoryBtn">全削除</button>
       </div>
+
       <div class="history-list" id="historyList"></div>
       <div class="result-footer">
         <button class="primary-btn" id="backFromHistoryBtn">← 設定に戻る</button>
