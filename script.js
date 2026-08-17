@@ -1,6 +1,7 @@
 "use strict";
 
 const STORAGE_KEY = "mahjong_history_v1";
+const PROGRESS_KEY = "mahjong_inprogress_v1";
 
 let members = [];
 let settings = {};
@@ -11,6 +12,8 @@ let game = {
   kyotaku: 0, rotation: 0,
   log: [], snapshots: []
 };
+
+let currentModalPlayerId = null;
 
 const DEFAULT_MEMBERS = [
   { id: 1, name: "坂井" }, { id: 2, name: "高木" },
@@ -25,13 +28,13 @@ const RYUKYOKU_LABELS = {
 
 // ===== 翻符 → 点数 計算テーブル =====
 function baseScore(han, fu) {
-  if (han >= 13) return 8000;                 // 役満
-  if (han >= 11) return 6000;                 // 三倍満
-  if (han >= 8)  return 4000;                 // 倍満
-  if (han >= 6)  return 3000;                 // 跳満
-  if (han === 5) return 2000;                 // 満貫
+  if (han >= 13) return 8000;
+  if (han >= 11) return 6000;
+  if (han >= 8)  return 4000;
+  if (han >= 6)  return 3000;
+  if (han === 5) return 2000;
   const raw = fu * Math.pow(2, 2 + han);
-  return Math.min(2000, raw);                 // 4翻以下で満貫超えする場合は満貫キャップ
+  return Math.min(2000, raw);
 }
 
 function scoreTable(han, fu) {
@@ -44,6 +47,45 @@ function scoreTable(han, fu) {
     tsumoChildFromDealer: ceil100(base * 2),
     tsumoDealerEach: ceil100(base * 2)
   };
+}
+
+// ===== 進行中対局のオートセーブ =====
+function saveProgress() {
+  try {
+    const honbaEl = document.getElementById("honba");
+    const snapshot = {
+      game,
+      honba: honbaEl ? (Number(honbaEl.value) || 0) : 0,
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(snapshot));
+  } catch (e) {
+    // 容量オーバー等の保存失敗は静かに無視
+  }
+}
+function loadProgress() {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)); }
+  catch (e) { return null; }
+}
+function clearProgress() {
+  localStorage.removeItem(PROGRESS_KEY);
+}
+function isValidProgress(saved) {
+  return !!(saved && saved.game && Array.isArray(saved.game.seats) &&
+    saved.game.seats.length === 4 && saved.game.actions);
+}
+function restoreProgress(saved) {
+  game = saved.game;
+  game.log = game.log || [];
+  game.snapshots = game.snapshots || [];
+
+  document.getElementById("roundWind").value = game.round.wind;
+  document.getElementById("roundNum").value = game.round.num;
+  document.getElementById("honba").value = saved.honba || 0;
+
+  renderScores();
+  updatePrevButton();
+  showScreen("record");
 }
 
 async function init() {
@@ -59,8 +101,19 @@ async function init() {
   }
   if (!Array.isArray(members) || members.length < 4) members = DEFAULT_MEMBERS;
 
-  game.date = new Date().toISOString().slice(0, 10);
   bindGlobalEvents();
+
+  const saved = loadProgress();
+  if (isValidProgress(saved)) {
+    const when = saved.savedAt ? new Date(saved.savedAt).toLocaleString("ja-JP") : "不明な時刻";
+    const resume = confirm(
+      `進行中の対局データが残っています（保存時刻: ${when}）。\n復元しますか？\n\n「キャンセル」を押すとこのデータは削除されます。`
+    );
+    if (resume) { restoreProgress(saved); return; }
+    clearProgress();
+  }
+
+  game.date = new Date().toISOString().slice(0, 10);
   buildSetupScreen();
   showScreen("setup");
 }
@@ -86,14 +139,49 @@ function bindGlobalEvents() {
   on("copyJsonBtn", "click", copyJsonExport);
   on("clearHistoryBtn", "click", clearHistory);
   on("calcBtn", "click", onCalc);
-  on("ryukyokuBtn", "click", onRyukyoku);
   on("endGameBtn", "click", onEndGame);
-  on("nextRoundBtn", "click", onNextRound);
-  on("prevRoundBtn", "click", onPrevRound);
   on("roundWind", "change", onRoundChange);
   on("roundNum", "change", onRoundChange);
   on("nextHanchanBtn", "click", onNextHanchan);
   on("rotateBtn", "click", onRotate);
+
+  // 座席カードタップでプレイヤー入力ポップアップ
+  ["seatTop", "seatLeft", "seatRight", "seatBottom"].forEach(domId => {
+    const el = document.getElementById(domId);
+    if (el) el.addEventListener("click", () => {
+      const pid = Number(el.dataset.playerId);
+      if (pid) openPlayerModal(pid);
+    });
+  });
+  on("playerModalClose", "click", closePlayerModal);
+  on("playerModalChomboBtn", "click", onChomboFromModal);
+  bindOverlayOutsideClose("playerModalOverlay", closePlayerModal);
+
+  // 中央タップで局・本場編集ポップアップ
+  const tableCenter = document.getElementById("tableCenter");
+  if (tableCenter) tableCenter.addEventListener("click", openRoundModal);
+  on("roundModalClose", "click", closeRoundModal);
+  on("prevRoundBtn", "click", onPrevRound);
+  on("nextRoundBtn", "click", onNextRound);
+  bindOverlayOutsideClose("roundModalOverlay", closeRoundModal);
+
+  // 流局処理ポップアップ
+  on("ryukyokuBtn", "click", openRyukyokuModal);
+  on("ryukyokuModalClose", "click", closeRyukyokuModal);
+  on("ryukyokuConfirmBtn", "click", onRyukyoku);
+  bindOverlayOutsideClose("ryukyokuModalOverlay", closeRyukyokuModal);
+
+  // 局・本場編集内の変更はオートセーブ
+  const roundModalBody = document.querySelector("#roundModalOverlay .modal-body");
+  if (roundModalBody) roundModalBody.addEventListener("change", saveProgress);
+}
+
+function bindOverlayOutsideClose(overlayId, closeFn) {
+  const overlay = document.getElementById(overlayId);
+  if (!overlay) return;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeFn();
+  });
 }
 
 function buildSetupScreen() {
@@ -132,6 +220,7 @@ function onStartGame() {
   game.log = []; game.snapshots = [];
   buildRecordScreen();
   showScreen("record");
+  saveProgress();
 }
 
 function buildRecordScreen() {
@@ -139,7 +228,6 @@ function buildRecordScreen() {
   document.getElementById("roundNum").value = game.round.num;
   document.getElementById("honba").value = 0;
   resetActions();
-  buildPlayerRows();
   renderScores();
   updatePrevButton();
 }
@@ -161,88 +249,100 @@ function getOyaId() { return game.seats[currentOyaSeatIndex()].id; }
 function getHonba() { return Number(document.getElementById("honba").value) || 0; }
 function seatIndexOf(id) { return game.seats.findIndex(m => m.id === id); }
 
-function buildPlayerRows() {
-  const list = document.getElementById("playerList");
-  list.innerHTML = "";
-  const oyaIdx = currentOyaSeatIndex();
-
-  game.seats.forEach((m, i) => {
-    const isOya = (i === oyaIdx);
-    const a = game.actions[m.id];
-    const ronOptions = game.seats
-      .filter(o => o.id !== m.id)
-      .map(o => `<option value="${o.id}" ${String(o.id) === a.agari ? "selected" : ""}>${o.name}</option>`)
-      .join("");
-
-    const card = document.createElement("div");
-    card.className = "player-card";
-    card.dataset.id = m.id;
-    card.innerHTML = `
-      <div class="pc-row1">
-        <div class="oya-mark ${isOya ? "is-oya" : ""}">${isOya ? "親" : "子"}</div>
-        <div class="pc-name">${m.name}</div>
-        <div class="seg" data-role="action">
-          <button type="button" data-val="none" class="${a.action === "none" ? "active" : ""}">未</button>
-          <button type="button" data-val="fuuro" class="${a.action === "fuuro" ? "active" : ""}">副露</button>
-          <button type="button" data-val="riichi" class="${a.action === "riichi" ? "active" : ""}">立直</button>
-        </div>
-        <input type="number" class="pc-input junme in-action-junme" placeholder="巡目" min="1" value="${a.actionJunme}">
-      </div>
-      <div class="pc-row2">
-        <span class="pc-label">和了</span>
-        <select class="pc-input agari in-agari">
-          <option value="none" ${a.agari === "none" ? "selected" : ""}>なし</option>
-          <option value="tenpai" ${a.agari === "tenpai" ? "selected" : ""}>聴牌</option>
-          <option value="tsumo" ${a.agari === "tsumo" ? "selected" : ""}>ツモ</option>
-          ${ronOptions}
-        </select>
-        <input type="number" class="pc-input junme in-agari-junme" placeholder="巡目" min="1" value="${a.agariJunme}">
-      </div>
-      <div class="pc-row2 point-row"></div>
-    `;
-    list.appendChild(card);
-
-    card.querySelectorAll('.seg[data-role="action"] button').forEach(btn => {
-      btn.addEventListener("click", () => {
-        card.querySelectorAll('.seg[data-role="action"] button').forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        syncActionFromCard(card, m.id);
-        updateJunmeEnabled(card, m.id);
-        renderPointInputs(card, m.id, isOya);
-      });
-    });
-    card.querySelector(".in-agari").addEventListener("change", () => {
-      syncActionFromCard(card, m.id);
-      updateJunmeEnabled(card, m.id);
-      renderPointInputs(card, m.id, isOya);
-    });
-    card.querySelectorAll(".in-action-junme, .in-agari-junme").forEach(el => {
-      el.addEventListener("change", () => syncActionFromCard(card, m.id));
-    });
-
-    updateJunmeEnabled(card, m.id);
-    renderPointInputs(card, m.id, isOya);
-  });
+// ===== プレイヤー入力ポップアップ =====
+function openPlayerModal(id) {
+  currentModalPlayerId = id;
+  const m = game.seats.find(s => s.id === id);
+  if (!m) return;
+  document.getElementById("playerModalName").textContent = m.name;
+  renderPlayerModalBody();
+  document.getElementById("playerModalOverlay").hidden = false;
+}
+function closePlayerModal() {
+  const overlay = document.getElementById("playerModalOverlay");
+  if (overlay) overlay.hidden = true;
+  currentModalPlayerId = null;
 }
 
-// 巡目欄の有効/無効を制御
-function updateJunmeEnabled(card, id) {
+function renderPlayerModalBody() {
+  const id = currentModalPlayerId;
+  if (id == null) return;
+  const isOya = (id === getOyaId());
   const a = game.actions[id];
+  const body = document.getElementById("playerModalBody");
+
+  const ronOptions = game.seats
+    .filter(o => o.id !== id)
+    .map(o => `<option value="${o.id}" ${String(o.id) === a.agari ? "selected" : ""}>${o.name}</option>`)
+    .join("");
+
+  body.innerHTML = `
+    <div class="pc-row1">
+      <div class="oya-mark ${isOya ? "is-oya" : ""}">${isOya ? "親" : "子"}</div>
+      <div class="seg" data-role="action">
+        <button type="button" data-val="none" class="${a.action === "none" ? "active" : ""}">未</button>
+        <button type="button" data-val="fuuro" class="${a.action === "fuuro" ? "active" : ""}">副露</button>
+        <button type="button" data-val="riichi" class="${a.action === "riichi" ? "active" : ""}">立直</button>
+      </div>
+      <input type="number" class="pc-input junme in-action-junme" placeholder="巡目" min="1" value="${a.actionJunme}">
+    </div>
+    <div class="pc-row2">
+      <span class="pc-label">和了</span>
+      <select class="pc-input agari in-agari">
+        <option value="none" ${a.agari === "none" ? "selected" : ""}>なし</option>
+        <option value="tenpai" ${a.agari === "tenpai" ? "selected" : ""}>聴牌</option>
+        <option value="tsumo" ${a.agari === "tsumo" ? "selected" : ""}>ツモ</option>
+        ${ronOptions}
+      </select>
+      <input type="number" class="pc-input junme in-agari-junme" placeholder="巡目" min="1" value="${a.agariJunme}">
+    </div>
+    <div class="pc-row2 point-row"></div>
+  `;
+
+  body.querySelectorAll('.seg[data-role="action"] button').forEach(btn => {
+    btn.addEventListener("click", () => {
+      body.querySelectorAll('.seg[data-role="action"] button').forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      syncActionFromModal(id);
+      updateJunmeEnabledModal(id);
+      renderPointInputsModal(id, isOya);
+      renderScores();
+      saveProgress();
+    });
+  });
+  body.querySelector(".in-agari").addEventListener("change", () => {
+    syncActionFromModal(id);
+    updateJunmeEnabledModal(id);
+    renderPointInputsModal(id, isOya);
+    renderScores();
+    saveProgress();
+  });
+  body.querySelectorAll(".in-action-junme, .in-agari-junme").forEach(el => {
+    el.addEventListener("change", () => { syncActionFromModal(id); saveProgress(); });
+  });
+
+  updateJunmeEnabledModal(id);
+  renderPointInputsModal(id, isOya);
+}
+
+function updateJunmeEnabledModal(id) {
+  const a = game.actions[id];
+  const body = document.getElementById("playerModalBody");
   const actEnabled = (a.action === "fuuro" || a.action === "riichi");
-  const actJunme = card.querySelector(".in-action-junme");
+  const actJunme = body.querySelector(".in-action-junme");
   actJunme.disabled = !actEnabled;
   if (!actEnabled) { actJunme.value = ""; a.actionJunme = ""; }
 
   const isWin = (a.agari === "tsumo" || /^\d+$/.test(a.agari));
-  const agJunme = card.querySelector(".in-agari-junme");
+  const agJunme = body.querySelector(".in-agari-junme");
   agJunme.disabled = !isWin;
   if (!isWin) { agJunme.value = ""; a.agariJunme = ""; }
 }
 
-// ===== 和了時の入力欄（翻符 + 自動計算プレビュー + 手動上書き可） =====
-function renderPointInputs(card, id, isOya) {
+function renderPointInputsModal(id, isOya) {
   const a = game.actions[id];
-  const row = card.querySelector(".point-row");
+  const body = document.getElementById("playerModalBody");
+  const row = body.querySelector(".point-row");
   const ag = a.agari;
   const isWin = (ag === "tsumo" || /^\d+$/.test(ag));
 
@@ -273,77 +373,96 @@ function renderPointInputs(card, id, isOya) {
   `;
   row.insertAdjacentHTML("beforeend", `<div class="pc-row2 point-sub-row">${pointFieldsHtml}</div>`);
 
-  // renderPointInputs() 内の applyAuto をこの内容に置き換え
   const applyAuto = () => {
-    const han = Number(card.querySelector(".in-han").value) || 0;
-    const fu  = Number(card.querySelector(".in-fu").value) || 0;
+    const han = Number(row.querySelector(".in-han").value) || 0;
+    const fu  = Number(row.querySelector(".in-fu").value) || 0;
     if (han <= 0) return;
     const honba = getHonba();
     const t = scoreTable(han, fu || 30);
     if (ag === "tsumo" && isOya) {
-      card.querySelector(".in-point").value = t.tsumoDealerEach + 100 * honba;
+      row.querySelector(".in-point").value = t.tsumoDealerEach + 100 * honba;
     } else if (ag === "tsumo") {
-      card.querySelector(".in-point-ko").value = t.tsumoChildFromChild + 100 * honba;
-      card.querySelector(".in-point-oya").value = t.tsumoChildFromDealer + 100 * honba;
+      row.querySelector(".in-point-ko").value = t.tsumoChildFromChild + 100 * honba;
+      row.querySelector(".in-point-oya").value = t.tsumoChildFromDealer + 100 * honba;
     } else {
-      card.querySelector(".in-point").value = (isOya ? t.ronDealer : t.ronChild) + 300 * honba;
+      row.querySelector(".in-point").value = (isOya ? t.ronDealer : t.ronChild) + 300 * honba;
     }
-    syncActionFromCard(card, id);
-  };  
-  card.querySelector(".in-han").addEventListener("change", applyAuto);
-  card.querySelector(".in-fu").addEventListener("change", applyAuto);
+    syncActionFromModal(id);
+  };
+  row.querySelector(".in-han").addEventListener("change", applyAuto);
+  row.querySelector(".in-fu").addEventListener("change", applyAuto);
   row.querySelectorAll(".point-sub-row input").forEach(el => {
-    el.addEventListener("change", () => syncActionFromCard(card, id));
+    el.addEventListener("change", () => syncActionFromModal(id));
   });
 }
 
-function syncActionFromCard(card, id) {
+function syncActionFromModal(id) {
   const a = game.actions[id];
-  const activeBtn = card.querySelector('.seg[data-role="action"] button.active');
+  const body = document.getElementById("playerModalBody");
+  const activeBtn = body.querySelector('.seg[data-role="action"] button.active');
   a.action      = activeBtn ? activeBtn.dataset.val : "none";
-  const actJ = card.querySelector(".in-action-junme");
+  const actJ = body.querySelector(".in-action-junme");
   a.actionJunme = actJ.disabled ? "" : actJ.value;
-  a.agari       = card.querySelector(".in-agari").value;
-  const agJ = card.querySelector(".in-agari-junme");
+  a.agari       = body.querySelector(".in-agari").value;
+  const agJ = body.querySelector(".in-agari-junme");
   a.agariJunme  = agJ.disabled ? "" : agJ.value;
 
-  const hanEl = card.querySelector(".in-han");
-  const fuEl  = card.querySelector(".in-fu");
+  const hanEl = body.querySelector(".in-han");
+  const fuEl  = body.querySelector(".in-fu");
   if (hanEl) a.han = hanEl.value;
   if (fuEl)  a.fu  = fuEl.value;
 
-  const pEl = card.querySelector(".in-point");
-  const koEl = card.querySelector(".in-point-ko");
-  const oyaEl = card.querySelector(".in-point-oya");
+  const pEl = body.querySelector(".in-point");
+  const koEl = body.querySelector(".in-point-ko");
+  const oyaEl = body.querySelector(".in-point-oya");
   if (pEl) a.point = pEl.value;
   if (koEl) a.pointKo = koEl.value;
   if (oyaEl) a.pointOya = oyaEl.value;
-
-  const winning = (a.agari === "tsumo" || /^\d+$/.test(a.agari));
-  card.classList.toggle("has-agari", winning);
 }
 
+// ===== 座席カード表示 =====
 const SEAT_DOM_IDS = ["seatBottom", "seatRight", "seatTop", "seatLeft"];
 
 function renderScores() {
+  const oyaIdx = currentOyaSeatIndex();
   SEAT_DOM_IDS.forEach((domId, pos) => {
     const seatIdx = (pos + game.rotation) % 4;
     const m = game.seats[seatIdx];
     const seat = document.getElementById(domId);
+    const a = game.actions[m.id] || {};
+    const isOya = (seatIdx === oyaIdx);
+    const isRiichi = (a.action === "riichi");
+    const isWinPending = (a.agari === "tsumo" || /^\d+$/.test(a.agari));
+
+    seat.dataset.playerId = m.id;
+    seat.classList.toggle("is-oya-seat", isOya);
+    seat.classList.toggle("is-riichi-seat", isRiichi);
+    seat.classList.toggle("is-win-pending", isWinPending);
     seat.innerHTML = `
+      ${isOya ? '<div class="seat-oya-badge">親</div>' : ""}
+      ${isRiichi ? '<div class="seat-riichi-badge">立直</div>' : ""}
       <div class="seat-name">${m.name}</div>
       <div class="seat-score">${game.scores[m.id].toLocaleString()}</div>
     `;
   });
+
   const total = Object.values(game.scores).reduce((a, b) => a + b, 0) + game.kyotaku;
-  document.getElementById("tableCenter").innerHTML = `合計<br>${total.toLocaleString()}`;
-  document.getElementById("kyotakuView").textContent = game.kyotaku.toLocaleString();
+  document.getElementById("tableCenter").innerHTML = `
+    <div>供託 ${game.kyotaku.toLocaleString()}</div>
+    <div>${game.round.wind}${game.round.num}局 ${getHonba()}本場</div>
+    <div class="tc-total">計 ${total.toLocaleString()}</div>
+  `;
 }
 
 function onRotate() {
   game.rotation = (game.rotation + 1) % 4;
   renderScores();
+  saveProgress();
 }
+
+// ===== 局・本場編集ポップアップ =====
+function openRoundModal() { document.getElementById("roundModalOverlay").hidden = false; }
+function closeRoundModal() { document.getElementById("roundModalOverlay").hidden = true; }
 
 function pushSnapshot() {
   game.snapshots.push({
@@ -371,9 +490,11 @@ function onPrevRound() {
   document.getElementById("honba").value = snap.honba;
 
   restoreActions(prevEntry);
-  buildPlayerRows();
+  closePlayerModal();
   renderScores();
   updatePrevButton();
+  closeRoundModal();
+  saveProgress();
 }
 
 function restoreActions(entry) {
@@ -394,11 +515,10 @@ function updatePrevButton() {
   document.getElementById("prevRoundBtn").disabled = (game.snapshots.length === 0);
 }
 
-// recordLog(result) の entry オブジェクトに1行追加
 function recordLog(result) {
   const entry = {
     wind: game.round.wind, num: game.round.num, honba: getHonba(),
-    kyotakuAtStart: game.kyotaku,   // ← 追加：この局開始時点の供託（前局からの持ち越し分）
+    kyotakuAtStart: game.kyotaku,
     result,
     players: game.seats.map(m => {
       const a = game.actions[m.id];
@@ -462,6 +582,7 @@ function headBumpWinner(winners, loserId) {
 }
 
 function onCalc() {
+  closePlayerModal();
   const oyaId = getOyaId();
 
   const winners = game.seats.filter(m => {
@@ -470,7 +591,7 @@ function onCalc() {
   });
 
   if (winners.length === 0) {
-    alert("和了者がいません。流局の場合は下の「流局処理」ボタンを押してください。");
+    alert("和了者がいません。流局の場合は「流局処理」を行ってください。");
     return;
   }
 
@@ -482,12 +603,32 @@ function onCalc() {
     }
   }
 
+  const ronWinners = winners.filter(w => /^\d+$/.test(game.actions[w.id].agari));
+  const tsumoWinners = winners.filter(w => game.actions[w.id].agari === "tsumo");
+  if (ronWinners.length > 0 && tsumoWinners.length > 0) {
+    alert("ツモとロンが同時に選択されています。入力を見直してください。");
+    return;
+  }
+  if (ronWinners.length >= 2) {
+    const loserIds = new Set(ronWinners.map(w => game.actions[w.id].agari));
+    if (loserIds.size > 1) {
+      alert("ダブロン・トリプルロンでは全員が同じ放銃者を選んでいる必要があります。");
+      return;
+    }
+  }
+  if (ronWinners.length >= 4) {
+    alert("同時に4人がロンすることはできません。");
+    return;
+  }
+
   const totalDelta = {};
   game.seats.forEach(m => { totalDelta[m.id] = 0; });
   game.seats.forEach(m => {
     if (game.actions[m.id].action === "riichi") totalDelta[m.id] -= 1000;
   });
   const pendingKyotaku = game.kyotaku + game.seats.filter(m => game.actions[m.id].action === "riichi").length * 1000;
+
+  const winSummary = [];
 
   for (const w of winners) {
     const a = game.actions[w.id];
@@ -506,6 +647,7 @@ function onCalc() {
     }
     if (!res.ok) { alert(`${w.name}：${res.msg}`); return; }
     game.seats.forEach(m => { totalDelta[m.id] += res.delta[m.id]; });
+    winSummary.push(`${w.name} +${res.delta[w.id].toLocaleString()}`);
   }
 
   let kyotakuWinnerId;
@@ -519,23 +661,37 @@ function onCalc() {
   totalDelta[kyotakuWinnerId] += pendingKyotaku;
 
   pushSnapshot();
-  recordLog({ kind: "hora" });
+  recordLog({
+    kind: "hora",
+    kyotakuWinnerId,
+    ronCount: ronWinners.length,
+    winners: winners.map(w => w.id)
+  });
 
   game.seats.forEach(m => { game.scores[m.id] += totalDelta[m.id]; });
   game.kyotaku = 0;
-  renderScores();
 
   const oyaWon = winners.some(w => w.id === oyaId);
   const oyaTenpai = (game.actions[oyaId].agari === "tenpai");
+
+  let title = "記録しました";
+  if (ronWinners.length === 2) title = "ダブロンを記録しました";
+  else if (ronWinners.length === 3) title = "トリプルロンを記録しました";
+  const kyotakuNote = pendingKyotaku > 0
+    ? `\n供託${pendingKyotaku.toLocaleString()}点 → ${game.seats.find(m => m.id === kyotakuWinnerId).name}`
+    : "";
+  const detail = `${winSummary.join(" / ")}${kyotakuNote}`;
+
   if (oyaWon || oyaTenpai) {
     incrementHonba();
     refreshActions();
-    alert("記録しました（連荘・本場+1）");
+    alert(`${title}\n${detail}\n（連荘・本場+1）`);
   } else {
     advanceRound(false);
-    alert("記録しました（局進行・本場リセット）");
+    alert(`${title}\n${detail}\n（局進行・本場リセット）`);
   }
   updatePrevButton();
+  saveProgress();
 }
 
 function isTenpai(id) {
@@ -569,7 +725,18 @@ function hasPendingWinSelection() {
   });
 }
 
-// ===== 流局処理(通常流局 / 途中流局 まとめて対応) =====
+// ===== 流局処理ポップアップ =====
+function openRyukyokuModal() {
+  if (hasPendingWinSelection()) {
+    alert("和了欄に選択が残っているプレイヤーがいます。「なし」または「聴牌」に変更してから、もう一度お試しください。");
+    return;
+  }
+  document.getElementById("ryukyokuModalOverlay").hidden = false;
+}
+function closeRyukyokuModal() {
+  document.getElementById("ryukyokuModalOverlay").hidden = true;
+}
+
 function onRyukyoku() {
   if (hasPendingWinSelection()) {
     alert("和了欄に選択が残っているプレイヤーがいます。「なし」または「聴牌」に変更してから、もう一度「流局処理」を押してください。");
@@ -582,14 +749,14 @@ function onRyukyoku() {
   const tenpaiIds = game.seats.filter(m => isTenpai(m.id)).map(m => m.id);
   recordLog({ kind: "ryukyoku", reason, tenpai: tenpaiIds });
 
-  applyRiichiKyotaku(); // どの理由でも必ず実行(四家立直の供託を含む)
+  applyRiichiKyotaku();
 
   let renchan;
   if (reason === "howanpai") {
-    applyTenpaiPayments();       // ノーテン罰符は通常流局のみ
+    applyTenpaiPayments();
     renchan = isTenpai(oyaId);
   } else {
-    renchan = true;              // 途中流局は常に連荘・罰符なし
+    renchan = true;
   }
   renderScores();
 
@@ -599,8 +766,56 @@ function onRyukyoku() {
   } else {
     advanceRound(true);
   }
+  closeRyukyokuModal();
   alert(`${RYUKYOKU_LABELS[reason]}を記録しました（供託は持ち越し）`);
   updatePrevButton();
+  saveProgress();
+}
+
+// ===== チョンボ処理（プレイヤーポップアップ内から実行） =====
+function onChomboFromModal() {
+  const foulerId = currentModalPlayerId;
+  if (foulerId == null) return;
+  const fouler = game.seats.find(m => m.id === foulerId);
+  if (!fouler) return;
+  if (hasPendingWinSelection()) {
+    alert("和了欄に選択が残っているプレイヤーがいます。「なし」または「聴牌」に変更してから、もう一度チョンボ処理を行ってください。");
+    return;
+  }
+  const oyaId = getOyaId();
+  const isOyaFoul = (foulerId === oyaId);
+
+  if (!confirm(`${fouler.name} のチョンボを記録します（マンガン払い）。\nこの局はやり直しとして扱われます。よろしいですか？`)) return;
+
+  const delta = {};
+  game.seats.forEach(m => { delta[m.id] = 0; });
+
+  if (isOyaFoul) {
+    game.seats.forEach(m => {
+      if (m.id === foulerId) return;
+      delta[m.id] += 4000;
+      delta[foulerId] -= 4000;
+    });
+  } else {
+    game.seats.forEach(m => {
+      if (m.id === foulerId) return;
+      const pay = (m.id === oyaId) ? 4000 : 2000;
+      delta[m.id] += pay;
+      delta[foulerId] -= pay;
+    });
+  }
+
+  pushSnapshot();
+  recordLog({ kind: "chombo", foulerId });
+  game.seats.forEach(m => { game.scores[m.id] += delta[m.id]; });
+
+  resetActions();
+  closePlayerModal();
+  renderScores();
+
+  alert(`チョンボを記録しました（${fouler.name}、マンガン払い／同一局をやり直します）`);
+  updatePrevButton();
+  saveProgress();
 }
 
 function incrementHonba() {
@@ -627,22 +842,31 @@ function advanceRound(addHonba) {
   document.getElementById("roundNum").value = num;
   document.getElementById("honba").value = carriedHonba;
   resetActions();
-  buildPlayerRows();
+  closePlayerModal();
+  renderScores();
 }
 
 function refreshActions() {
   resetActions();
-  buildPlayerRows();
+  renderScores();
+  if (currentModalPlayerId != null) {
+    renderPlayerModalBody();
+  }
 }
 
-function onNextRound() { advanceRound(false); }
+function onNextRound() {
+  advanceRound(false);
+  closeRoundModal();
+  saveProgress();
+}
 
 function onRoundChange() {
   game.round.wind = document.getElementById("roundWind").value;
   game.round.num = Number(document.getElementById("roundNum").value);
   document.getElementById("honba").value = 0;
   resetActions();
-  buildPlayerRows();
+  closePlayerModal();
+  renderScores();
 }
 
 function computeResult() {
@@ -664,10 +888,27 @@ function computeResult() {
 
 function onEndGame() {
   if (!confirm("対局を終了します。よろしいですか？\n結果が確定し、履歴に保存されます。")) return;
+  closePlayerModal();
+  closeRoundModal();
+  closeRyukyokuModal();
   const results = computeResult();
   renderResultScreen(results);
   saveHistory(results);
+  clearProgress();
   showScreen("result");
+}
+
+function chomboNamesInLog(log, players) {
+  return (log || [])
+    .filter(e => e.result && e.result.kind === "chombo")
+    .map(e => {
+      const p = players.find(pl => pl.id === e.result.foulerId);
+      return p ? p.name : "?";
+    });
+}
+
+function multiRonCountInLog(log) {
+  return (log || []).filter(e => e.result && e.result.kind === "hora" && e.result.ronCount >= 2).length;
 }
 
 function renderResultScreen(results) {
@@ -685,8 +926,14 @@ function renderResultScreen(results) {
       </tr>
     `);
   });
-  document.getElementById("resultMeta").textContent =
+
+  let metaHtml =
     `${game.date} ／ ${game.hanchanNo}半荘目（単位：千点 / 返し${settings.returnScore} ウマ${settings.umaTop}-${settings.umaSecond}）`;
+  const chomboNames = chomboNamesInLog(game.log, game.seats);
+  if (chomboNames.length) {
+    metaHtml += `<br><span class="chombo-note">⚠ チョンボ: ${chomboNames.map(escapeHtml).join("・")}</span>`;
+  }
+  document.getElementById("resultMeta").innerHTML = metaHtml;
 }
 
 function loadHistory() {
@@ -754,6 +1001,11 @@ function logToText(h) {
     lines.push(`${entry.wind}${entry.num}局${entry.honba}本場`);
     if (entry.result && entry.result.kind === "ryukyoku" && entry.result.reason !== "howanpai") {
       lines.push(`(${RYUKYOKU_LABELS[entry.result.reason]})`);
+    } else if (entry.result && entry.result.kind === "chombo") {
+      const foulerName = nameById[entry.result.foulerId] || "";
+      lines.push(`(チョンボ: ${foulerName})`);
+    } else if (entry.result && entry.result.kind === "hora" && entry.result.ronCount >= 2) {
+      lines.push(`(${entry.result.ronCount === 2 ? "ダブロン" : "トリプルロン"})`);
     }
     entry.players.forEach(p => {
       const hasContent = (p.action !== "none") || (p.agari !== "none");
@@ -784,6 +1036,15 @@ function renderHistoryList() {
     }).join("");
     const logText = logToText(h);
 
+    const chomboNames = (h.log && h.log.length) ? chomboNamesInLog(h.log, h.log[0].players) : [];
+    const chomboBadge = chomboNames.length
+      ? `<div class="hc-chombo">⚠ チョンボ: ${chomboNames.map(escapeHtml).join("・")}</div>`
+      : "";
+    const multiRonCount = (h.log && h.log.length) ? multiRonCountInLog(h.log) : 0;
+    const multiRonBadge = multiRonCount > 0
+      ? `<div class="hc-multiron">🀄 ダブロン/トリプルロン: ${multiRonCount}回</div>`
+      : "";
+
     list.insertAdjacentHTML("beforeend", `
       <div class="history-card">
         <div class="hc-head">
@@ -793,6 +1054,8 @@ function renderHistoryList() {
             <button class="hc-copy" data-idx="${idx}">コピー</button>
           </span>
         </div>
+        ${chomboBadge}
+        ${multiRonBadge}
         <table>${rows}</table>
         <div class="hc-log" data-log="${idx}" hidden>${escapeHtml(logText)}</div>
       </div>
@@ -869,13 +1132,11 @@ function seatIdxInPlayers(players, id) {
   return players.findIndex(p => p.id === id);
 }
 
-// 1局分のログエントリ → 新スキーマのkyokuオブジェクト
 function kyokuFromLogEntry(entry) {
   const events = [];
   const players = entry.players;
   const oyaSeatIdx = (entry.num - 1) % 4;
 
-  // 副露・立直
   players.forEach((p, idx) => {
     if (p.action === "fuuro" && p.actionJunme) {
       events.push({ t: Number(p.actionJunme), type: "meld", actor: idx });
@@ -884,7 +1145,6 @@ function kyokuFromLogEntry(entry) {
     }
   });
 
-  // 和了
   players.forEach((p, idx) => {
     if (p.agari === "tsumo") {
       const isOyaWin = (idx === oyaSeatIdx);
@@ -909,16 +1169,20 @@ function kyokuFromLogEntry(entry) {
     }
   });
 
-  // 流局
   if (entry.result && entry.result.kind === "ryukyoku") {
     events.push({
       type: "ryukyoku",
       kind: entry.result.reason,
       tenpai: entry.result.tenpai.map(id => seatIdxInPlayers(players, id))
     });
+  } else if (entry.result && entry.result.kind === "chombo") {
+    events.push({
+      type: "chombo",
+      actor: seatIdxInPlayers(players, entry.result.foulerId)
+    });
   }
 
-  return {
+  const kyokuObj = {
     bakaze: WIND_TO_BAKAZE[entry.wind] || entry.wind,
     kyoku: entry.num,
     honba: entry.honba,
@@ -926,6 +1190,13 @@ function kyokuFromLogEntry(entry) {
     oya: oyaSeatIdx,
     events
   };
+
+  if (entry.result && entry.result.kind === "hora" && entry.result.kyotakuWinnerId != null) {
+    kyokuObj.kyotakuTo = seatIdxInPlayers(players, entry.result.kyotakuWinnerId);
+    if (entry.result.ronCount >= 2) kyokuObj.ronCount = entry.result.ronCount;
+  }
+
+  return kyokuObj;
 }
 
 function buildJsonExport() {
