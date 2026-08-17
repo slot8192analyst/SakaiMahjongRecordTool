@@ -12,21 +12,23 @@
     <section class="screen" id="screen-setup">
       <h2 class="screen-title">対局設定</h2>
       <div class="setup-body">
-        <div class="setup-row">
-          <label>日付</label>
-          <input type="date" id="gameDate">
+        <div class="setup-row-combo">
+          <div class="date-group">
+            <label>日付</label>
+            <input type="date" id="gameDate">
+          </div>
+          <div class="hanchan-group">
+            <label>半荘</label>
+            <input type="number" id="hanchanNo" min="1" value="1">
+            <span class="unit">半荘目</span>
+          </div>
         </div>
-        <div class="setup-row">
-          <label>半荘</label>
-          <input type="number" id="hanchanNo" min="1" value="1">
-          <span class="unit">半荘目</span>
-        </div>
-        <div class="setup-section-title">参加メンバー（東南西北 順）</div>
+        <div class="setup-section-title">参加メンバー（ハンドルをドラッグで席替え）</div>
         <div class="seat-setup" id="seatSetup"></div>
       </div>
-      <div class="setup-footer">
-        <button class="primary-btn" id="startBtn">対局開始 →</button>
+      <div class="setup-footer setup-footer-row">
         <button class="ghost-btn" id="historyBtn">対局履歴を見る</button>
+        <button class="primary-btn" id="startBtn">対局開始 →</button>
       </div>
     </section>
 
@@ -35,6 +37,10 @@
 
         <div class="table-main">
           <div class="table-topbar">
+            <div class="round-nav-corner">
+              <button id="prevRoundBtn" class="corner-btn back-btn" title="前局やり直し">◀</button>
+              <button id="nextRoundBtn" class="corner-btn" title="次局へ">▶</button>
+            </div>
             <button id="rotateBtn" type="button" class="rotate-btn">⟳ 回転</button>
           </div>
           <div class="table-wrap" id="tableWrap">
@@ -64,8 +70,9 @@
             <button type="button" class="modal-close" id="playerModalClose">✕</button>
           </div>
           <div class="modal-body" id="playerModalBody"></div>
-          <div class="modal-foot">
-            <button type="button" class="modal-chombo-btn" id="playerModalChomboBtn">⚠ この人がチョンボ</button>
+          <div class="modal-foot two-col uneven">
+            <button type="button" class="modal-chombo-btn" id="playerModalChomboBtn">チョンボ</button>
+            <button type="button" class="modal-confirm-btn" id="playerModalConfirmBtn">確定</button>
           </div>
         </div>
       </div>
@@ -102,9 +109,8 @@
               <span class="unit">本場</span>
             </div>
           </div>
-          <div class="modal-foot two-col">
-            <button type="button" id="prevRoundBtn" class="mini-btn back-btn">◀ 前局やり直し</button>
-            <button type="button" id="nextRoundBtn" class="mini-btn">次局へ ▶</button>
+          <div class="modal-foot">
+            <button type="button" class="primary-btn" id="roundModalConfirmBtn">確定</button>
           </div>
         </div>
       </div>

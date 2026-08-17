@@ -14,12 +14,15 @@ let game = {
 };
 
 let currentModalPlayerId = null;
+let setupSeatOrder = [];
+let dragState = null;
 
 const DEFAULT_MEMBERS = [
   { id: 1, name: "坂井" }, { id: 2, name: "高木" },
   { id: 3, name: "中江" }, { id: 4, name: "福原" }
 ];
 const DEFAULT_SETTINGS = { initialScore: 25000, returnScore: 30000, umaTop: 20, umaSecond: 10 };
+const WINDS4 = ["東", "南", "西", "北"];
 
 const RYUKYOKU_LABELS = {
   howanpai: "通常流局", kyushukyuhai: "九種九牌",
@@ -144,6 +147,8 @@ function bindGlobalEvents() {
   on("roundNum", "change", onRoundChange);
   on("nextHanchanBtn", "click", onNextHanchan);
   on("rotateBtn", "click", onRotate);
+  on("prevRoundBtn", "click", onPrevRound);
+  on("nextRoundBtn", "click", onNextRound);
 
   // 座席カードタップでプレイヤー入力ポップアップ
   ["seatTop", "seatLeft", "seatRight", "seatBottom"].forEach(domId => {
@@ -154,6 +159,7 @@ function bindGlobalEvents() {
     });
   });
   on("playerModalClose", "click", closePlayerModal);
+  on("playerModalConfirmBtn", "click", closePlayerModal);
   on("playerModalChomboBtn", "click", onChomboFromModal);
   bindOverlayOutsideClose("playerModalOverlay", closePlayerModal);
 
@@ -161,8 +167,7 @@ function bindGlobalEvents() {
   const tableCenter = document.getElementById("tableCenter");
   if (tableCenter) tableCenter.addEventListener("click", openRoundModal);
   on("roundModalClose", "click", closeRoundModal);
-  on("prevRoundBtn", "click", onPrevRound);
-  on("nextRoundBtn", "click", onNextRound);
+  on("roundModalConfirmBtn", "click", closeRoundModal);
   bindOverlayOutsideClose("roundModalOverlay", closeRoundModal);
 
   // 流局処理ポップアップ
@@ -184,32 +189,95 @@ function bindOverlayOutsideClose(overlayId, closeFn) {
   });
 }
 
+// ===== 対局設定：席順カード（ドラッグで入れ替え） =====
 function buildSetupScreen() {
   document.getElementById("gameDate").value = game.date;
   document.getElementById("hanchanNo").value = game.hanchanNo;
-  const winds = ["東", "南", "西", "北"];
+
+  if (game.seats && game.seats.length === 4) {
+    setupSeatOrder = game.seats.map(m => m.id);
+  } else if (!setupSeatOrder || setupSeatOrder.length !== 4) {
+    setupSeatOrder = members.slice(0, 4).map(m => m.id);
+  }
+  renderSeatSetupCards();
+}
+
+function renderSeatSetupCards() {
   const wrap = document.getElementById("seatSetup");
   wrap.innerHTML = "";
-  winds.forEach((w, i) => {
+  setupSeatOrder.forEach((memberId, i) => {
     const options = members.map(m =>
-      `<option value="${m.id}" ${m.id === members[i].id ? "selected" : ""}>${m.name}</option>`
+      `<option value="${m.id}" ${m.id === memberId ? "selected" : ""}>${m.name}</option>`
     ).join("");
     wrap.insertAdjacentHTML("beforeend", `
-      <div class="seat-pick">
-        <div class="wind">${w}</div>
-        <select class="seat-select" data-seat="${i}">${options}</select>
+      <div class="seat-order-card" data-seat-idx="${i}">
+        <div class="seat-order-handle" data-drag-handle>☰</div>
+        <div class="seat-order-wind">${WINDS4[i]}</div>
+        <select class="seat-order-select" data-seat-idx="${i}">${options}</select>
       </div>
     `);
+  });
+  bindSeatOrderSelectEvents();
+  bindSeatOrderDrag();
+}
+
+function bindSeatOrderSelectEvents() {
+  document.querySelectorAll(".seat-order-select").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const idx = Number(sel.dataset.seatIdx);
+      setupSeatOrder[idx] = Number(sel.value);
+    });
+  });
+}
+
+// ハンドルを押したまま入れ替えたい相手のカードまで指を動かすと2人が入れ替わる
+function bindSeatOrderDrag() {
+  document.querySelectorAll(".seat-order-card").forEach(card => {
+    const handle = card.querySelector("[data-drag-handle]");
+
+    handle.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      dragState = { fromIdx: Number(card.dataset.seatIdx) };
+      card.classList.add("dragging");
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    handle.addEventListener("pointermove", (e) => {
+      if (!dragState) return;
+      const cards = Array.from(document.querySelectorAll(".seat-order-card"));
+      const under = cards.find(c => {
+        const r = c.getBoundingClientRect();
+        return e.clientY >= r.top && e.clientY <= r.bottom;
+      });
+      if (under) {
+        const toIdx = Number(under.dataset.seatIdx);
+        if (toIdx !== dragState.fromIdx) {
+          const tmp = setupSeatOrder[dragState.fromIdx];
+          setupSeatOrder[dragState.fromIdx] = setupSeatOrder[toIdx];
+          setupSeatOrder[toIdx] = tmp;
+          const fromSelect = document.querySelector(`.seat-order-select[data-seat-idx="${dragState.fromIdx}"]`);
+          const toSelect = document.querySelector(`.seat-order-select[data-seat-idx="${toIdx}"]`);
+          if (fromSelect) fromSelect.value = setupSeatOrder[dragState.fromIdx];
+          if (toSelect) toSelect.value = setupSeatOrder[toIdx];
+        }
+      }
+    });
+
+    const endDrag = () => {
+      dragState = null;
+      card.classList.remove("dragging");
+    };
+    handle.addEventListener("pointerup", endDrag);
+    handle.addEventListener("pointercancel", endDrag);
   });
 }
 
 function onStartGame() {
   game.date = document.getElementById("gameDate").value;
   game.hanchanNo = Number(document.getElementById("hanchanNo").value) || 1;
-  const selects = document.querySelectorAll(".seat-select");
-  const chosen = Array.from(selects).map(s => Number(s.value));
+  const chosen = setupSeatOrder.slice();
   if (new Set(chosen).size !== chosen.length) {
-    alert("同じメンバーが重複しています。東南西北それぞれ別の人を選んでください。");
+    alert("同じメンバーが重複しています。カードをドラッグして重複しないよう調整してください。");
     return;
   }
   game.seats = chosen.map(id => members.find(m => m.id === id));
@@ -446,11 +514,9 @@ function renderScores() {
     `;
   });
 
-  const total = Object.values(game.scores).reduce((a, b) => a + b, 0) + game.kyotaku;
   document.getElementById("tableCenter").innerHTML = `
     <div>供託 ${game.kyotaku.toLocaleString()}</div>
     <div>${game.round.wind}${game.round.num}局 ${getHonba()}本場</div>
-    <div class="tc-total">計 ${total.toLocaleString()}</div>
   `;
 }
 
@@ -493,7 +559,6 @@ function onPrevRound() {
   closePlayerModal();
   renderScores();
   updatePrevButton();
-  closeRoundModal();
   saveProgress();
 }
 
@@ -856,7 +921,6 @@ function refreshActions() {
 
 function onNextRound() {
   advanceRound(false);
-  closeRoundModal();
   saveProgress();
 }
 
