@@ -91,13 +91,15 @@ body {
 .seat-setup-layout .seat-right  { grid-area: right; }
 
 .seat.seat-setup-card {
-  /* .seat 側で指定されている position:absolute はGrid配置と競合するため打ち消す */
   position: relative; top: auto; left: auto; right: auto; bottom: auto; transform: none;
-  width: auto; min-width: clamp(96px, 25dvw, 140px); max-width: 150px;
+  /* グリッドのセルには十分な余白があったため、上限(max)値を中心に一回り大きくした。
+     min側もあわせて上げているが、下限としては控えめに残し、
+     縦向き(393px幅)でも安全に収まる余地を確保している */
+  width: auto; min-width: clamp(120px, 30dvw, 190px); max-width: 200px;
   box-sizing: border-box;
-  padding: clamp(10px, 3.4dvh, 16px) clamp(10px, 4dvw, 18px);
+  padding: clamp(14px, 4.6dvh, 20px) clamp(14px, 5dvw, 22px);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: clamp(4px, 1.2dvh, 8px); cursor: default;
+  gap: clamp(6px, 1.8dvh, 10px); cursor: default;
   background: var(--panel-2); border: none; box-shadow: 0 2px 6px rgba(0,0,0,.35);
 }
 .seat.seat-setup-card.dragging {
@@ -105,30 +107,27 @@ body {
 }
 
 .seat-setup-wind-badge {
-  position: absolute; top: -11px; left: -11px;
-  width: clamp(20px, 5.2dvh, 26px); height: clamp(20px, 5.2dvh, 26px); border-radius: 50%;
-  background: var(--accent); color: #fff; font-size: clamp(10px, 2.2dvh, 12px); font-weight: bold;
+  position: absolute; top: -13px; left: -13px;
+  width: clamp(24px, 6.2dvh, 30px); height: clamp(24px, 6.2dvh, 30px); border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: clamp(12px, 2.6dvh, 14px); font-weight: bold;
   display: flex; align-items: center; justify-content: center;
 }
 .seat-setup-handle {
-  position: absolute; top: -11px; right: -11px;
-  width: clamp(20px, 5.2dvh, 26px); height: clamp(20px, 5.2dvh, 26px); border-radius: 50%;
+  position: absolute; top: -13px; right: -13px;
+  width: clamp(24px, 6.2dvh, 30px); height: clamp(24px, 6.2dvh, 30px); border-radius: 50%;
   background: var(--panel); color: var(--muted);
-  font-size: clamp(11px, 2.4dvh, 13px); display: flex; align-items: center; justify-content: center;
+  font-size: clamp(13px, 2.8dvh, 15px); display: flex; align-items: center; justify-content: center;
   cursor: grab; touch-action: none; box-shadow: 0 1px 3px rgba(0,0,0,.4);
 }
 
-/* iOSはネイティブ<select>にCSSのpadding/font-sizeを無視した最低高さを
-   強制してくるため、appearanceをリセットして自前の見た目に差し替える。
-   これによりカードのサイズが確実にCSSの指定どおりに縮む/収まるようになる */
 .seat-setup-select {
   appearance: none; -webkit-appearance: none; -moz-appearance: none;
   width: 100%;
-  padding: clamp(6px, 1.8dvh, 9px) clamp(20px, 5dvw, 24px) clamp(6px, 1.8dvh, 9px) clamp(6px, 1.8dvw, 8px);
+  padding: clamp(8px, 2.4dvh, 12px) clamp(24px, 6dvw, 28px) clamp(8px, 2.4dvh, 12px) clamp(8px, 2.2dvw, 10px);
   border: none; border-radius: 6px;
-  font-size: clamp(13px, 2.8dvh, 16px); font-weight: bold;
-  background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%239a9aa5'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 6px center;
-  background-size: 16px 16px;
+  font-size: clamp(15px, 3.4dvh, 18px); font-weight: bold;
+  background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%239a9aa5'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 8px center;
+  background-size: 18px 18px;
   color: var(--text); text-align: center; line-height: 1.2;
 }
 
