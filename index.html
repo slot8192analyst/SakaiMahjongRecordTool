@@ -9,10 +9,13 @@
 <body>
   <div class="phone-frame">
 
-    <section class="screen" id="screen-setup">
-      <h2 class="screen-title">対局設定</h2>
-      <div class="setup-body">
-        <div class="setup-row-combo">
+<section class="screen" id="screen-setup">
+  <div class="landscape-layout">
+
+    <div class="table-main">
+      <div class="setup-topbar">
+        <h2 class="setup-topbar-title">対局設定</h2>
+        <div class="setup-row-combo setup-topbar-inputs">
           <div class="date-group">
             <label>日付</label>
             <input type="date" id="gameDate">
@@ -23,14 +26,23 @@
             <span class="unit">半荘目</span>
           </div>
         </div>
-        <div class="setup-section-title">参加メンバー（ハンドルをドラッグで席替え）</div>
-        <div class="seat-setup" id="seatSetup"></div>
       </div>
-      <div class="setup-footer setup-footer-row">
-        <button class="ghost-btn" id="historyBtn">対局履歴を見る</button>
-        <button class="primary-btn" id="startBtn">対局開始 →</button>
+      <div class="setup-body">
+        <div class="seat-setup-caption">ハンドル(☰)をドラッグして席替え</div>
+        <div class="seat-setup-wrap" id="seatSetupWrap">
+          <div class="seat-setup-layout" id="seatSetupLayout"></div>
+        </div>
       </div>
-    </section>
+    </div>
+
+    <div class="side-panel">
+      <button type="button" class="side-btn" id="historyBtn">対局<br>履歴</button>
+      <button type="button" class="side-btn primary" id="startBtn">対局開始<br>→</button>
+    </div>
+
+  </div>
+</section>
+
 
     <section class="screen" id="screen-record" hidden>
       <div class="landscape-layout">

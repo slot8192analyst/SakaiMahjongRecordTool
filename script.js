@@ -202,18 +202,20 @@ function buildSetupScreen() {
   renderSeatSetupCards();
 }
 
+const SETUP_POS_CLASS = ["seat-bottom", "seat-right", "seat-top", "seat-left"];
+
 function renderSeatSetupCards() {
-  const wrap = document.getElementById("seatSetup");
-  wrap.innerHTML = "";
+  const layout = document.getElementById("seatSetupLayout");
+  layout.innerHTML = "";
   setupSeatOrder.forEach((memberId, i) => {
     const options = members.map(m =>
       `<option value="${m.id}" ${m.id === memberId ? "selected" : ""}>${m.name}</option>`
     ).join("");
-    wrap.insertAdjacentHTML("beforeend", `
-      <div class="seat-order-card" data-seat-idx="${i}">
-        <div class="seat-order-handle" data-drag-handle>☰</div>
-        <div class="seat-order-wind">${WINDS4[i]}</div>
-        <select class="seat-order-select" data-seat-idx="${i}">${options}</select>
+    layout.insertAdjacentHTML("beforeend", `
+      <div class="seat seat-setup-card ${SETUP_POS_CLASS[i]}" data-seat-idx="${i}">
+        <div class="seat-setup-wind-badge">${WINDS4[i]}</div>
+        <div class="seat-setup-handle" data-drag-handle>☰</div>
+        <select class="seat-setup-select" data-seat-idx="${i}">${options}</select>
       </div>
     `);
   });
@@ -222,7 +224,7 @@ function renderSeatSetupCards() {
 }
 
 function bindSeatOrderSelectEvents() {
-  document.querySelectorAll(".seat-order-select").forEach(sel => {
+  document.querySelectorAll(".seat-setup-select").forEach(sel => {
     sel.addEventListener("change", () => {
       const idx = Number(sel.dataset.seatIdx);
       setupSeatOrder[idx] = Number(sel.value);
@@ -231,8 +233,9 @@ function bindSeatOrderSelectEvents() {
 }
 
 // ハンドルを押したまま入れ替えたい相手のカードまで指を動かすと2人が入れ替わる
+// (座席が卓のように2D配置されたため、指の位置に最も近い中心を持つカードを判定する)
 function bindSeatOrderDrag() {
-  document.querySelectorAll(".seat-order-card").forEach(card => {
+  document.querySelectorAll(".seat-setup-card").forEach(card => {
     const handle = card.querySelector("[data-drag-handle]");
 
     handle.addEventListener("pointerdown", (e) => {
@@ -244,19 +247,23 @@ function bindSeatOrderDrag() {
 
     handle.addEventListener("pointermove", (e) => {
       if (!dragState) return;
-      const cards = Array.from(document.querySelectorAll(".seat-order-card"));
-      const under = cards.find(c => {
+      const cards = Array.from(document.querySelectorAll(".seat-setup-card"));
+      let nearest = null, nearestDist = Infinity;
+      cards.forEach(c => {
         const r = c.getBoundingClientRect();
-        return e.clientY >= r.top && e.clientY <= r.bottom;
+        const dx = e.clientX - (r.left + r.width / 2);
+        const dy = e.clientY - (r.top + r.height / 2);
+        const dist = dx * dx + dy * dy;
+        if (dist < nearestDist) { nearestDist = dist; nearest = c; }
       });
-      if (under) {
-        const toIdx = Number(under.dataset.seatIdx);
+      if (nearest) {
+        const toIdx = Number(nearest.dataset.seatIdx);
         if (toIdx !== dragState.fromIdx) {
           const tmp = setupSeatOrder[dragState.fromIdx];
           setupSeatOrder[dragState.fromIdx] = setupSeatOrder[toIdx];
           setupSeatOrder[toIdx] = tmp;
-          const fromSelect = document.querySelector(`.seat-order-select[data-seat-idx="${dragState.fromIdx}"]`);
-          const toSelect = document.querySelector(`.seat-order-select[data-seat-idx="${toIdx}"]`);
+          const fromSelect = document.querySelector(`.seat-setup-select[data-seat-idx="${dragState.fromIdx}"]`);
+          const toSelect = document.querySelector(`.seat-setup-select[data-seat-idx="${toIdx}"]`);
           if (fromSelect) fromSelect.value = setupSeatOrder[dragState.fromIdx];
           if (toSelect) toSelect.value = setupSeatOrder[toIdx];
         }
