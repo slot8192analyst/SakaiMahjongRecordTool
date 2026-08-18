@@ -32,7 +32,40 @@ body {
     width: 100%; max-width: 852px;
     height: 100dvh; max-height: 393px;
   }
+
+  /* 横向きは縦幅が極端に狭くなるため、実際の表示高さ(dvh)を基準に
+     主要パーツのpadding/font-sizeを可変にし、端末が違っても
+     縦にはみ出して見切れないようにする */
+  .table-main { padding: clamp(6px, 2.2dvh, 16px) clamp(10px, 3dvh, 20px); }
+  .table-topbar { margin-bottom: clamp(2px, 1dvh, 6px); }
+  .corner-btn, .rotate-btn {
+    padding: clamp(3px, 1.1dvh, 6px) clamp(8px, 2dvw, 12px);
+    font-size: clamp(10px, 2.6dvh, 14px);
+  }
+  .seat {
+    padding: clamp(8px, 3dvh, 18px) clamp(10px, 4dvw, 22px);
+    min-width: clamp(92px, 24dvw, 130px);
+  }
+  .seat .seat-name  { font-size: clamp(10px, 2.4dvh, 14px); }
+  .seat .seat-score { font-size: clamp(15px, 4.6dvh, 24px); }
+  .seat-oya-badge {
+    width: clamp(16px, 4.6dvh, 24px); height: clamp(16px, 4.6dvh, 24px);
+    font-size: clamp(9px, 2dvh, 11px); top: -10px; left: -10px;
+  }
+  .seat-riichi-badge {
+    font-size: clamp(8px, 1.8dvh, 10px); padding: 2px 6px; top: -10px; right: -10px;
+  }
+  .table-center {
+    font-size: clamp(9px, 2.2dvh, 12px);
+    padding: clamp(4px, 1.4dvh, 8px) clamp(8px, 2.6dvw, 14px);
+  }
+  .side-panel {
+    gap: clamp(6px, 1.6dvh, 12px);
+    padding: clamp(6px, 1.8dvh, 14px);
+  }
+  .side-btn { font-size: clamp(10px, 2.4dvh, 14px); }
 }
+
 
 .screen { width: 100%; height: 100%; display: flex; flex-direction: column; }
 .screen-title {
